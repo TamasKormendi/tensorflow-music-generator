@@ -3,13 +3,14 @@ import scipy.io.wavfile
 
 #Note: does not read 24-bit files
 def read_wav_file(filepath):
-    sample_rate, samples = scipy.io.wavfile.read(filepath)
+    sampling_rate, samples = scipy.io.wavfile.read(filepath)
 
-    return sample_rate, samples
+    return sampling_rate, samples
 
 def write_wav_file(filepath, sample_rate, samples):
     scipy.io.wavfile.write(filepath, sample_rate, samples)
 
+"""
 if __name__:
     #Do not do this for normal usage but for testing it is fine
     np.set_printoptions(threshold = np.nan)
@@ -21,3 +22,4 @@ if __name__:
     print(samples)
 
     write_wav_file("../test_write.wav", sample_rate, samples)
+"""
