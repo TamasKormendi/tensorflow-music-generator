@@ -2,6 +2,7 @@ import tensorflow as tf
 import numpy as np
 import utils
 
+# One smaller than the real positive limit for 16 bits, to leave -1 and 1 available
 BIT_RANGE = 32766
 
 class Dataloader(object):
@@ -24,8 +25,6 @@ class Dataloader(object):
 
             :return: Sampling rate and a numpy array containing the data
         """
-        #One smaller than the real positive limit for 16 bits, to leave -1 and 1 available
-
 
         sampling_rate, raw_samples = utils.read_wav_file(filepath)
         scaled_samples = []
@@ -36,7 +35,7 @@ class Dataloader(object):
         scaled_samples.insert(0, 1)
         scaled_samples.append(-1)
 
-        #Pad it if necessary so the length is divisible by window_size
+        # Pad it if necessary so the length is divisible by window_size
         if len(scaled_samples) % self.window_size == 0:
             return sampling_rate, np.asarray(scaled_samples, dtype=np.float32)
         else:
