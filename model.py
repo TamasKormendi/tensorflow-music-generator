@@ -42,6 +42,7 @@ def conv1d_transpose(
 """
     Input: 100 random values with shape [None, 100] - called "z" in original code
     Output: 16384 sound samples with shape [None, 16384, 1]
+    The "None"s are the batch size, 1 in the output is the number of channels
 """
 
 def GANGenerator(
@@ -155,7 +156,7 @@ def GANDiscriminator(
     else:
         phaseshuffle = lambda x: x
 
-    #Conv layer 0
+    # Conv layer 0
     output = input
 
     with tf.variable_scope("downconv_0"):
@@ -193,7 +194,7 @@ def GANDiscriminator(
     # Flatten the output
     output = tf.reshape(output, [batch_size, 4 * 4 * dim * 16])
 
-    #Compute a single output
+    # Compute a single output
     with tf.variable_scope("output"):
         output = tf.layers.dense(output, 1)[:, 0]
 

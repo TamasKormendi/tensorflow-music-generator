@@ -5,6 +5,7 @@ import utils
 # One smaller than the real positive limit for 16 bits, to leave -1 and 1 available
 BIT_RANGE = 32766
 
+# TODO: get batching done and directory loading too
 class Dataloader(object):
 
     def __init__(self, window_size, filepath):
