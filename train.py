@@ -92,3 +92,54 @@ def train(filepath):
 
             sess.run(G_train_op)
 
+def infer(train_dir):
+    infer_dir = os.path.join(train_dir, "infer")
+    if not os.path.isdir(infer_dir):
+        os.makedirs(infer_dir)
+
+    # Subgraph that generates latent vectors
+
+    # Number of samples to generate
+    sample_amount = tf.placeholder(tf.int32, [], name="samp_z_n")
+    # Input samples
+    input_samples = tf.random_uniform([sample_amount, G_INIT_INPUT_SIZE], -1.0, 1.0, dtype=tf.float32, name="samp_z")
+
+    input_placeholder = tf.placeholder(tf.float32, [None, G_INIT_INPUT_SIZE], name="z")
+    flat_pad = tf.placeholder(tf.int32, [], name="flat_pad")
+
+    # Run the generator
+    with tf.variable_scope("G"):
+        generator_output = GANGenerator(input_placeholder, train=False)
+    generator_output = tf.identity(generator_output, name="G_z")
+
+    # Flatten batch
+    num_channels = int(generator_output.get_shape()[-1])
+    output_padded = tf.pad(generator_output, [[0, 0], [0, flat_pad], [0, 0]])
+    output_flattened = tf.reshape(output_padded, [-1, num_channels], name="G_z_flat")
+
+    # Encode to int16 - assumes division by 32767 to encode to [-1, 1] float range
+    def float_to_int16(input, name=None):
+        input_int16 = input * 32767
+        input_int16 = tf.clip_by_value(input_int16, -32767., 32767)
+        input_int16 = tf.cast(input_int16, tf.int16, name=name)
+        return input_int16
+    generator_output_int16 = float_to_int16(generator_output, name="G_z_int16")
+    generator_output_flat_int16 = float_to_int16(output_flattened, name="G_z_flat_int16")
+
+    # Create saver
+    G_vars = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope="G")
+    global_step = tf.train.get_or_create_global_step()
+    saver = tf.train.Saver(G_vars + [global_step])
+
+    # Export graph
+    tf.train.write_graph(tf.get_default_graph(), infer_dir, "infer.pbtxt")
+
+    # Export metagraph
+    infer_metagraph_filepath = os.path.join(infer_dir, "infer.meta")
+    tf.train.export_meta_graph(
+        filename=infer_metagraph_filepath,
+        clear_devices=True,
+        saver_def=saver.as_saver_def()
+    )
+
+    tf.reset_default_graph()

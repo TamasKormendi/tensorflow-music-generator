@@ -76,25 +76,25 @@ def GANGenerator(
         output = batchnorm(output)
     output = tf.nn.relu(output)
 
-    # Conv layer 0
+    # Conv layer 1
     with tf.variable_scope("upconv_1"):
         output = conv1d_transpose(output, dim * 4, kernel_len, upsample=upsample)
         output = batchnorm(output)
     output = tf.nn.relu(output)
 
-    # Conv layer 0
+    # Conv layer 2
     with tf.variable_scope("upconv_2"):
         output = conv1d_transpose(output, dim * 2, kernel_len, upsample=upsample)
         output = batchnorm(output)
     output = tf.nn.relu(output)
 
-    # Conv layer 0
+    # Conv layer 3
     with tf.variable_scope("upconv_3"):
         output = conv1d_transpose(output, dim, kernel_len, upsample=upsample)
         output = batchnorm(output)
     output = tf.nn.relu(output)
 
-    # Conv layer 0
+    # Conv layer 4
     with tf.variable_scope("upconv_4"):
         output = conv1d_transpose(output, 1, kernel_len, upsample=upsample)
     output = tf.nn.tanh(output)
