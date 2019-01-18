@@ -3,9 +3,14 @@ import time
 
 import numpy as np
 import tensorflow as tf
+import pickle
 
 from model import GANGenerator, GANDiscriminator
 import dataloader
+import utils
+
+
+
 SAMPLING_RATE = 16000
 # 100 random inputs for the generator
 G_INIT_INPUT_SIZE = 100
@@ -32,6 +37,18 @@ def train(filepath):
     with tf.variable_scope("G"):
         G_output = GANGenerator(G_input, train=True)
     G_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope="G")
+
+    # Write generator summary
+    tf.summary.audio("real_input", x, SAMPLING_RATE)
+    tf.summary.audio("generator_output", G_output)
+    # RMS = reduced mean square
+    G_output_rms = tf.sqrt(tf.reduce_mean(tf.square(G_output[:, :, 0]), axis=1))
+    real_input_rms = tf.sqrt(tf.reduce_mean(tf.square(x[:, :, 0]), axis=1))
+    tf.summary.histogram("real_input_rms_batch", real_input_rms)
+    tf.summary.histogram("G_output_rms_batch", G_output_rms)
+    # Reduce the rms of batches into a single scalar
+    tf.summary.scalar("real_input_rms", tf.reduce_mean(real_input_rms))
+    tf.summary.scalar("G_output_rms", tf.reduce_mean(G_output_rms))
 
     # Discriminator with real input data
     with tf.name_scope("D_real"), tf.variable_scope("D"):
@@ -112,14 +129,15 @@ def infer(train_dir):
         generator_output = GANGenerator(input_placeholder, train=False)
     generator_output = tf.identity(generator_output, name="G_z")
 
-    # Flatten batch
+    # Flatten batch and pad it so there is a pause between generated samples
+    # Only generate one file
     num_channels = int(generator_output.get_shape()[-1])
     output_padded = tf.pad(generator_output, [[0, 0], [0, flat_pad], [0, 0]])
     output_flattened = tf.reshape(output_padded, [-1, num_channels], name="G_z_flat")
 
     # Encode to int16 - assumes division by 32767 to encode to [-1, 1] float range
-    def float_to_int16(input, name=None):
-        input_int16 = input * 32767
+    def float_to_int16(input_values, name=None):
+        input_int16 = input_values * 32767
         input_int16 = tf.clip_by_value(input_int16, -32767., 32767)
         input_int16 = tf.cast(input_int16, tf.int16, name=name)
         return input_int16
@@ -143,3 +161,81 @@ def infer(train_dir):
     )
 
     tf.reset_default_graph()
+
+# Generate preview audio files - should be run in a separate process, parallel to or after training
+# Might be problems with it when saving random input vectors with a given amount_to_preview
+# and using another value when running it again
+def preview(train_dir, amount_to_preview):
+    preview_dir = os.path.join(train_dir, "preview")
+    if not os.path.isdir(preview_dir):
+        os.makedirs(preview_dir)
+
+    # Graph loading - might or might not have to change this, we'll see
+    infer_metagraph_filepath = os.path.join(train_dir, "infer", "infer.meta")
+    graph = tf.get_default_graph()
+    saver = tf.train.import_meta_graph(infer_metagraph_filepath)
+
+    # Generate or restore the input random latent vector for the generator
+    input_filepath = os.path.join(preview_dir, "z.pkl")
+    if os.path.exists(input_filepath):
+        with open(input_filepath, "rb") as f:
+            input_values = pickle.load(f)
+    else:
+        # Generate random input values for the generator
+        sample_feeds = {}
+        sample_feeds[graph.get_tensor_by_name("samp_z_n:0")] = amount_to_preview
+        sample_fetches = {}
+        # "zs" are the random input values
+        sample_fetches["zs"] = graph.get_tensor_by_name("samp_z:0")
+        with tf.Session as sess:
+            fetched_values = sess.run(sample_fetches, sample_feeds)
+        input_values = fetched_values["zs"]
+
+        # Save random input
+        with open(input_filepath, "wb") as f:
+            pickle.dump(input_values, f)
+
+        # Set up the graph for the generator
+        feeds = {}
+        feeds[graph.get_tensor_by_name("z:0")] = input_values
+        # Leave half of win_size length of no audio between samples
+        feeds[graph.get_tensor_by_name("flat_pad:0")] = window_size // 2
+        fetches = {}
+        fetches["step"] = tf.train.get_or_create_global_step()
+        # Output of the generator
+        fetches["G_z"] = graph.get_tensor_by_name("G_z:0")
+        # Output of the generator, flattened and transformed to int16
+        fetches["G_z_flat_int16"] = graph.get_tensor_by_name("G_z_flat_int16:0")
+
+        # Write summary
+        output = graph.get_tensor_by_name("G_z_flat:0")
+        summaries = [tf.summary.audio("preview", tf.expand_dims(output, axis=0), SAMPLING_RATE, max_outputs=1)]
+        fetches["summaries"] = tf.summary.merge(summaries)
+        summary_writer = tf.summary.FileWriter(preview_dir)
+
+        # Loop, wait until a new checkpoint is found - if found, execute
+        checkpoint_filepath = None
+        while True:
+            latest_checkpoint_filepath = tf.train.latest_checkpoint(train_dir)
+
+            if latest_checkpoint_filepath != checkpoint_filepath:
+                print("Preview: {}".format(latest_checkpoint_filepath))
+
+                with tf.Session() as sess:
+                    saver.restore(sess, latest_checkpoint_filepath)
+
+                    fetches_results = sess.run(fetches, feeds)
+                    training_step = fetches_results["step"]
+
+                preview_filepath = os.path.join(preview_dir, "{}.wav".format(str(training_step).zfill(8)))
+                utils.write_wav_file(preview_filepath, SAMPLING_RATE, fetches_results["G_z_flat_in16"])
+
+                summary_writer.add_summary(fetches_results["summaries"], training_step)
+
+                print("Wav written")
+
+                checkpoint_filepath = latest_checkpoint_filepath
+
+            time.sleep(1)
+
+
