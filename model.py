@@ -63,6 +63,8 @@ def GANGenerator(
     # Reshape layer/projection
     output = input
 
+    # [100] to [16, 1024]
+    # 16-length, 1024 channels
     with tf.variable_scope("input_project"):
         output = tf.layers.dense(output, 4 * 4 * dim *16)
         output = tf.reshape(output, [batch_size, 16, dim * 16])
@@ -70,33 +72,41 @@ def GANGenerator(
 
     output = tf.nn.relu(output)
 
+    # Every conv layer quadruples the amount of samples
+    # And halves the channels (aside from the last one)
+
     # Conv layer 0
+    # [16, 1024] to [64, 512]
     with tf.variable_scope("upconv_0"):
-        output = conv1d_transpose(output, dim * 8, kernel_len, upsample=upsample)
+        output = conv1d_transpose(output, dim * 8, kernel_len, 4, upsample=upsample)
         output = batchnorm(output)
     output = tf.nn.relu(output)
 
     # Conv layer 1
+    # [64, 512] to [256, 256]
     with tf.variable_scope("upconv_1"):
-        output = conv1d_transpose(output, dim * 4, kernel_len, upsample=upsample)
+        output = conv1d_transpose(output, dim * 4, kernel_len, 4, upsample=upsample)
         output = batchnorm(output)
     output = tf.nn.relu(output)
 
     # Conv layer 2
+    # [256, 256] to [1024, 128]
     with tf.variable_scope("upconv_2"):
-        output = conv1d_transpose(output, dim * 2, kernel_len, upsample=upsample)
+        output = conv1d_transpose(output, dim * 2, kernel_len, 4, upsample=upsample)
         output = batchnorm(output)
     output = tf.nn.relu(output)
 
     # Conv layer 3
+    # [1024, 128] to [4096, 64]
     with tf.variable_scope("upconv_3"):
-        output = conv1d_transpose(output, dim, kernel_len, upsample=upsample)
+        output = conv1d_transpose(output, dim, kernel_len, 4, upsample=upsample)
         output = batchnorm(output)
     output = tf.nn.relu(output)
 
     # Conv layer 4
+    # [4096, 64] to [16384, 1]
     with tf.variable_scope("upconv_4"):
-        output = conv1d_transpose(output, 1, kernel_len, upsample=upsample)
+        output = conv1d_transpose(output, 1, kernel_len, 4, upsample=upsample)
     output = tf.nn.tanh(output)
 
     # Need to use an identity matrix because otherwise the batchnorm moving values don't get
@@ -133,7 +143,8 @@ def apply_phaseshuffle(input, radius, pad_type="reflect"):
     return output
 
 """
-    Input: 16384 sound samples
+    Input: 16384 sound samples:
+    [None, 16384, 1] - [batch_size, samples, channels]
     Output: linear value
 """
 
@@ -156,15 +167,18 @@ def GANDiscriminator(
     else:
         phaseshuffle = lambda x: x
 
-    # Conv layer 0
+
     output = input
 
+    # Conv layer 0
+    # [16384, 1] to [4096, 64]
     with tf.variable_scope("downconv_0"):
         output = tf.layers.conv1d(output, dim, kernel_len, 4, padding="SAME")
     output = lrelu(output)
     output = phaseshuffle(output)
 
     # Conv layer 1
+    # [4096, 64] to [1024, 128]
     with tf.variable_scope("downconv_1"):
         output = tf.layers.conv1d(output, dim * 2, kernel_len, 4, padding="SAME")
         output = batchnorm(output)
@@ -172,6 +186,7 @@ def GANDiscriminator(
     output = phaseshuffle(output)
 
     # Conv layer 2
+    # [1024, 128] to [256, 256]
     with tf.variable_scope("downconv_2"):
         output = tf.layers.conv1d(output, dim * 4, kernel_len, 4, padding="SAME")
         output = batchnorm(output)
@@ -179,6 +194,7 @@ def GANDiscriminator(
     output = phaseshuffle(output)
 
     # Conv layer 3
+    # [256, 256] to [64, 512]
     with tf.variable_scope("downconv_3"):
         output = tf.layers.conv1d(output, dim * 8, kernel_len, 4, padding="SAME")
         output = batchnorm(output)
@@ -186,6 +202,7 @@ def GANDiscriminator(
     output = phaseshuffle(output)
 
     # Conv layer 4
+    # [64, 512] to [16, 1024]
     with tf.variable_scope("downconv_4"):
         output = tf.layers.conv1d(output, dim * 16, kernel_len, 4, padding="SAME")
         output = batchnorm(output)
