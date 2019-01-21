@@ -10,7 +10,6 @@ import dataloader
 import utils
 
 
-
 SAMPLING_RATE = 16000
 # 100 random inputs for the generator
 G_INIT_INPUT_SIZE = 100
@@ -26,9 +25,8 @@ batch_size = 64
 # D = discriminator
 
 def train(filepath):
-    loader = dataloader.Dataloader(window_size, "audio/")
+    loader = dataloader.Dataloader(window_size, batch_size, "audio/")
 
-    # TODO: change this to a placeholder so can be used for looping through data
     x = loader.get_next()
 
     G_input = tf.random_uniform([batch_size, G_INIT_INPUT_SIZE], -1., 1., dtype=tf.float32)
@@ -237,5 +235,3 @@ def preview(train_dir, amount_to_preview):
                 checkpoint_filepath = latest_checkpoint_filepath
 
             time.sleep(1)
-
-
