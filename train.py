@@ -24,8 +24,8 @@ batch_size = 64
 # G = generator
 # D = discriminator
 
-def train(filepath):
-    loader = dataloader.Dataloader(window_size, batch_size, "audio/")
+def train(training_data_dir, train_dir):
+    loader = dataloader.Dataloader(window_size, batch_size, training_data_dir)
 
     x = loader.get_next()
 
@@ -96,7 +96,7 @@ def train(filepath):
     # Training
     # TODO: This'll definitely have to be changed
     with tf.train.MonitoredTrainingSession(
-        checkpoint_dir="checkpoints/",
+        checkpoint_dir=train_dir,
         save_checkpoint_secs=300,
         save_summaries_secs=300) as sess:
         while True:
@@ -235,3 +235,18 @@ def preview(train_dir, amount_to_preview):
                 checkpoint_filepath = latest_checkpoint_filepath
 
             time.sleep(1)
+
+if __name__ == "main":
+    training_data_dir = "/data"
+    training_dir = "/checkpoints"
+    amount_to_preview = 5
+
+    mode = "train"
+
+    if mode == "train":
+        infer(training_dir)
+        train(training_data_dir, training_dir)
+    elif mode == "preview":
+        preview(training_dir, amount_to_preview)
+    elif mode == "infer":
+        infer(training_dir)

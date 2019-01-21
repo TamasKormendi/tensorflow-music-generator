@@ -21,6 +21,10 @@ class Dataloader(object):
 
         self.sampling_rate, self.all_sliced_samples = self.process_directory(filepath)
 
+        # https://stackoverflow.com/questions/14822184/is-there-a-ceiling-equivalent-of-operator-in-python/17511341#17511341
+        # Basically math.ceil() but with support for big ints
+        self.num_batches = -(-len(self.all_sliced_samples) // batch_size)
+
     def process_file(self, filepath):
         """
         Load a 16-bit PCM wav file and preprocess it:
@@ -84,9 +88,12 @@ class Dataloader(object):
 
         # Create a dataset and batch it
         dataset = tf.data.Dataset.from_tensor_slices(self.all_sliced_samples)
-        # There should be no remainders, but just in case
-        dataset.batch(self.batch_size, True)
 
+        # If (self.batch_size, True) the last batch gets dropped if size < normal batch_size
+        dataset.batch(self.batch_size)
+
+        # TODO: has to be changed if the training gets split to separate epochs, need TODO below too for that
+        dataset = dataset.repeat()
         # TODO: Might have to change this to an initialisable iterator if we run into memory issues
         iterator = dataset.make_one_shot_iterator()
 
