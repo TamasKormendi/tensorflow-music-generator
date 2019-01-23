@@ -81,6 +81,9 @@ def train(training_data_dir, train_dir):
 
     D_loss += LAMBDA * gradient_penalty
 
+    tf.summary.scalar("Generator_loss", G_loss)
+    tf.summary.scalar("Discriminator_loss", D_loss)
+
     # Optimisers - pretty sure for progressive growing changes might be needed, look at the PGGAN paper
     G_opt = tf.train.AdamOptimizer(
         learning_rate=1e-4,
