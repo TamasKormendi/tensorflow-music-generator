@@ -25,9 +25,13 @@ batch_size = 64
 # D = discriminator
 
 def train(training_data_dir, train_dir):
+    print("Training called")
+
     loader = dataloader.Dataloader(window_size, batch_size, training_data_dir)
 
     x = loader.get_next()
+
+    print(x.get_shape())
 
     G_input = tf.random_uniform([batch_size, G_INIT_INPUT_SIZE], -1., 1., dtype=tf.float32)
 
@@ -38,7 +42,7 @@ def train(training_data_dir, train_dir):
 
     # Write generator summary
     tf.summary.audio("real_input", x, SAMPLING_RATE)
-    tf.summary.audio("generator_output", G_output)
+    tf.summary.audio("generator_output", G_output, SAMPLING_RATE)
     # RMS = reduced mean square
     G_output_rms = tf.sqrt(tf.reduce_mean(tf.square(G_output[:, :, 0]), axis=1))
     real_input_rms = tf.sqrt(tf.reduce_mean(tf.square(x[:, :, 0]), axis=1))
@@ -99,13 +103,16 @@ def train(training_data_dir, train_dir):
         checkpoint_dir=train_dir,
         save_checkpoint_secs=300,
         save_summaries_secs=300) as sess:
+        print("Training start")
         while True:
 
             # Train discriminator
             for i in range(D_UPDATES_PER_G_UPDATE):
                 sess.run(D_train_op)
+            print("Discriminator trained")
 
             sess.run(G_train_op)
+            print("Generator trained")
 
 def infer(train_dir):
     infer_dir = os.path.join(train_dir, "infer")
@@ -159,6 +166,8 @@ def infer(train_dir):
     )
 
     tf.reset_default_graph()
+
+    print("Metagraph construction done")
 
 # Generate preview audio files - should be run in a separate process, parallel to or after training
 # Might be problems with it when saving random input vectors with a given amount_to_preview
@@ -236,9 +245,10 @@ def preview(train_dir, amount_to_preview):
 
             time.sleep(1)
 
-if __name__ == "main":
-    training_data_dir = "/data"
-    training_dir = "/checkpoints"
+if __name__ == "__main__":
+
+    training_data_dir = "data/"
+    training_dir = "checkpoints/"
     amount_to_preview = 5
 
     mode = "train"
