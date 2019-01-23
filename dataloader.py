@@ -38,6 +38,8 @@ class Dataloader(object):
         for sample in raw_samples:
             scaled_samples.append(sample / BIT_RANGE)
 
+        print("File at {} loaded".format(filepath))
+
         return sampling_rate, scaled_samples
 
     def process_directory(self, directory_path):
@@ -66,16 +68,44 @@ class Dataloader(object):
             remainder = len(all_samples) % self.window_length
 
             padding_length = self.window_length - remainder
-            all_samples.append([0] * padding_length)
+            all_samples.extend([0] * padding_length)
 
         # Slice all the data into window_length chunks so they can be batched later
         index = 0
 
+        prev_slice_length = 0
+        current_slice_length = 0
+        counter = 0
+        mismatch = False
+
         while index < len(all_samples):
+            if mismatch:
+                print("Not the last value")
+
             current_slice = all_samples[index:index + self.window_length]
-            sliced_samples.append(current_slice)
+
+            if counter == 0:
+                prev_slice_length = len(current_slice)
+                current_slice_length = len(current_slice)
+                counter += 1
+            else:
+                current_slice_length = len(current_slice)
+
+            if current_slice_length != prev_slice_length:
+                print("Slice length mismatch, previous: {}, current: {}".format(prev_slice_length, current_slice_length))
+                mismatch = True
+
+            current_slice_reshaped = np.asarray(current_slice, dtype=np.float32)
+            # 1 is the channel amount
+            current_slice_reshaped.shape = (self.window_length, 1)
+
+            sliced_samples.append(current_slice_reshaped)
 
             index += self.window_length
+
+            prev_slice_length = len(current_slice)
+
+        print("All files loaded")
 
         return sampling_rate, np.asarray(sliced_samples, dtype=np.float32)
 
@@ -90,7 +120,8 @@ class Dataloader(object):
         dataset = tf.data.Dataset.from_tensor_slices(self.all_sliced_samples)
 
         # If (self.batch_size, True) the last batch gets dropped if size < normal batch_size
-        dataset.batch(self.batch_size)
+        # Current implementation is way too reliant on fixed batch sizes so the remainder is dropped
+        dataset = dataset.batch(self.batch_size, True)
 
         # TODO: has to be changed if the training gets split to separate epochs, need TODO below too for that
         dataset = dataset.repeat()
