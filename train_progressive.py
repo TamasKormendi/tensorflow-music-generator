@@ -304,12 +304,15 @@ def make_custom_scaffold(stage_id, optimiser_var_list, training_root_directory):
     # Init_op is dummy since init_fn does the initialisation
     return tf.train.Scaffold(init_op=tf.constant([]), init_fn=initialisation_function)
 
-
-
 # Return the name of a possibly existing training subdirectory
 # stage_id corresponds to num_blocks for now
 def get_train_subdirectory(stage_id, training_root_directory):
     return os.path.join(training_root_directory, "stage_{:05d}".format(stage_id))
+
+def get_window_length(num_blocks):
+    base_exponent = 2
+    block_multiplier = 2 * num_blocks
+    return 2 ** (base_exponent + block_multiplier)
 
 
 # TODO: sepcify num_blocks in model building functions before running
