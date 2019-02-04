@@ -5,7 +5,7 @@ import numpy as np
 import tensorflow as tf
 import pickle
 
-from model_progressive import GANGenerator, GANDiscriminator
+from model_progressive import GANGenerator, GANDiscriminator, block_name
 import dataloader
 import utils
 
@@ -84,21 +84,26 @@ def train(training_data_dir, train_dir):
     tf.summary.scalar("Generator_loss", G_loss)
     tf.summary.scalar("Discriminator_loss", D_loss)
 
-    # Optimisers - pretty sure for progressive growing changes might be needed, look at the PGGAN paper
-    G_opt = tf.train.AdamOptimizer(
-        learning_rate=1e-4,
-        beta1=0.5,
-        beta2=0.9
-    )
-    D_opt = tf.train.AdamOptimizer(
-        learning_rate=1e-4,
-        beta1=0.5,
-        beta2=0.9
-    )
+    with tf.variable_scope("optimiser_vars") as var_scope:
+        # Optimisers - pretty sure for progressive growing changes might be needed, look at the PGGAN paper
+        G_opt = tf.train.AdamOptimizer(
+            learning_rate=1e-4,
+            beta1=0.5,
+            beta2=0.9
+        )
+        D_opt = tf.train.AdamOptimizer(
+            learning_rate=1e-4,
+            beta1=0.5,
+            beta2=0.9
+        )
 
-    # Training ops
-    G_train_op = G_opt.minimize(G_loss, var_list=G_vars, global_step=tf.train.get_or_create_global_step())
-    D_train_op = D_opt.minimize(D_loss, var_list=D_vars)
+        # Training ops - need to specify the var_list so it does not default to all vars within TRAINABLE_VARIABLES
+        # See: https://www.tensorflow.org/api_docs/python/tf/train/AdamOptimizer#minimize
+        G_train_op = G_opt.minimize(G_loss, var_list=G_vars, global_step=tf.train.get_or_create_global_step())
+        D_train_op = D_opt.minimize(D_loss, var_list=D_vars)
+
+    optimiser_vars = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope=var_scope.name)
+
 
     # Training
     # TODO: This'll definitely have to be changed
@@ -256,6 +261,58 @@ def preview(train_dir, amount_to_preview):
 
         time.sleep(1)
 
+
+# Stage_id is equivalent to num_blocks for now
+def make_custom_scaffold(stage_id, optimiser_var_list, training_root_directory):
+    restore_var_list = []
+    previous_checkpoint = None
+    current_checkpoint = tf.train.latest_checkpoint(get_train_subdirectory(stage_id, training_root_directory))
+    # Skip var restoration if training only has 1 block and no saved checkpoint
+    if stage_id > 1 and current_checkpoint is None:
+        previous_checkpoint = tf.train.latest_checkpoint(get_train_subdirectory(stage_id - 1, training_root_directory))
+
+        num_blocks = stage_id
+        prev_num_blocks = stage_id - 1
+
+        new_block_var_list = []
+        for block_id in range(prev_num_blocks + 1, num_blocks + 1):
+            new_block_var_list.extend(
+                tf.get_collection(
+                    tf.GraphKeys.GLOBAL_VARIABLES,
+                    scope=".*/{}/".format(block_name(block_id))
+                )
+            )
+
+        restore_var_list = [var for var in tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES)
+                            if var not in set(optimiser_var_list + new_block_var_list)]
+    elif current_checkpoint is not None:
+        restore_var_list = [var for var in tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES)]
+
+    saver_for_restoration = tf.train.Saver(var_list=restore_var_list, allow_empty=True)
+
+    init_op = tf.global_variables_initializer()
+
+    def initialisation_function(unused_scaffold, sess):
+        sess.run(init_op)
+        print("Variables to restore:")
+        print("\n".join([var.name for var in restore_var_list]))
+        if current_checkpoint is not None:
+            saver_for_restoration.restore(sess, current_checkpoint)
+        elif previous_checkpoint is not None:
+            saver_for_restoration.restore(sess, previous_checkpoint)
+
+    # Init_op is dummy since init_fn does the initialisation
+    return tf.train.Scaffold(init_op=tf.constant([]), init_fn=initialisation_function)
+
+
+
+# Return the name of a possibly existing training subdirectory
+# stage_id corresponds to num_blocks for now
+def get_train_subdirectory(stage_id, training_root_directory):
+    return os.path.join(training_root_directory, "stage_{:05d}".format(stage_id))
+
+
+# TODO: sepcify num_blocks in model building functions before running
 if __name__ == "__main__":
 
     training_data_dir = "data/"
