@@ -87,11 +87,11 @@ def GANGenerator(
 
     # For now, try with 512 fmaps initially
 
-    # [100] to [16, 512]
-    # 16-length, 512 channels
+    # [100] to [16, 1024]
+    # 16-length, 1024 channels
     with tf.variable_scope("input_project"):
-        output = tf.layers.dense(output, 4 * 4 * dim * 8)
-        output = tf.reshape(output, [batch_size, 16, dim * 8])
+        output = tf.layers.dense(output, 4 * 4 * dim * 16)
+        output = tf.reshape(output, [batch_size, 16, dim * 16])
         output = batchnorm(output)
 
     output = tf.nn.relu(output)
