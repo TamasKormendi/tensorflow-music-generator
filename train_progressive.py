@@ -16,15 +16,15 @@ G_INIT_INPUT_SIZE = 100
 # TODO: PLACEHOLDER
 D_UPDATES_PER_G_UPDATE = 5
 
-# TODO: Will have to adjust this for prog growing
+# Set later in main properly
 window_size = 16384
-# TODO: PLACEHOLDER
-batch_size = 64
+# TODO: figure out the highest batch_sizes for each stage that doesn't cause out-of-memory error
+batch_size = 16
 
 # G = generator
 # D = discriminator
 
-def train(training_data_dir, train_dir):
+def train(training_data_dir, train_dir, stage_id):
     print("Training called")
 
     loader = dataloader.Dataloader(window_size, batch_size, training_data_dir)
@@ -37,7 +37,7 @@ def train(training_data_dir, train_dir):
 
     # Generator network
     with tf.variable_scope("G"):
-        G_output = GANGenerator(G_input, train=True)
+        G_output = GANGenerator(G_input, train=True, num_blocks=stage_id)
     G_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope="G")
 
     # Write generator summary
@@ -54,12 +54,12 @@ def train(training_data_dir, train_dir):
 
     # Discriminator with real input data
     with tf.name_scope("D_real"), tf.variable_scope("D"):
-        D_real_output = GANDiscriminator(x)
+        D_real_output = GANDiscriminator(x, num_blocks=stage_id)
     D_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope="D")
 
     # Discriminator with fake input data
     with tf.name_scope("D_fake"), tf.variable_scope("D", reuse=True):
-        D_fake_output = GANDiscriminator(G_output)
+        D_fake_output = GANDiscriminator(G_output, num_blocks=stage_id)
 
     # Only use the WGAN-GP loss for now
     G_loss = -tf.reduce_mean(D_fake_output)
@@ -72,7 +72,7 @@ def train(training_data_dir, train_dir):
 
     interpolates = x + (alpha * differences)
     with tf.name_scope("D_interpolates"), tf.variable_scope("D", reuse=True):
-        D_interpolates_output = GANDiscriminator(interpolates)
+        D_interpolates_output = GANDiscriminator(interpolates, num_blocks=stage_id)
 
     LAMBDA = 10
     gradients = tf.gradients(D_interpolates_output, [interpolates])[0]
@@ -104,25 +104,30 @@ def train(training_data_dir, train_dir):
 
     optimiser_vars = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope=var_scope.name)
 
+    scaffold = make_custom_scaffold(stage_id, optimiser_vars, train_dir)
+
 
     # Training
     # TODO: This'll definitely have to be changed
     with tf.train.MonitoredTrainingSession(
-        checkpoint_dir=train_dir,
+        checkpoint_dir=get_train_subdirectory(stage_id, train_dir),
         save_checkpoint_secs=300,
-        save_summaries_secs=300) as sess:
+        save_summaries_secs=300,
+        scaffold=scaffold) as sess:
         print("Training start")
         while True:
 
             # Train discriminator
             for i in range(D_UPDATES_PER_G_UPDATE):
                 sess.run(D_train_op)
-            print("Discriminator trained")
+            # print("Discriminator trained")
 
             sess.run(G_train_op)
-            print("Generator trained")
+            # print("Generator trained")
 
-def infer(train_dir):
+            print("Both networks trained")
+
+def infer(train_dir, stage_id):
     infer_dir = os.path.join(train_dir, "infer")
     if not os.path.isdir(infer_dir):
         os.makedirs(infer_dir)
@@ -139,7 +144,7 @@ def infer(train_dir):
 
     # Run the generator
     with tf.variable_scope("G"):
-        generator_output = GANGenerator(input_placeholder, train=False)
+        generator_output = GANGenerator(input_placeholder, train=False, num_blocks=stage_id)
     generator_output = tf.identity(generator_output, name="G_z")
 
     # Flatten batch and pad it so there is a pause between generated samples
@@ -271,15 +276,27 @@ def make_custom_scaffold(stage_id, optimiser_var_list, training_root_directory):
     if stage_id > 1 and current_checkpoint is None:
         previous_checkpoint = tf.train.latest_checkpoint(get_train_subdirectory(stage_id - 1, training_root_directory))
 
-        num_blocks = stage_id
+        number_of_blocks = stage_id
         prev_num_blocks = stage_id - 1
 
         new_block_var_list = []
-        for block_id in range(prev_num_blocks + 1, num_blocks + 1):
+        for block_id in range(prev_num_blocks + 1, number_of_blocks + 1):
             new_block_var_list.extend(
                 tf.get_collection(
                     tf.GraphKeys.GLOBAL_VARIABLES,
                     scope=".*/{}/".format(block_name(block_id))
+                )
+            )
+            new_block_var_list.extend(
+                tf.get_collection(
+                    tf.GraphKeys.GLOBAL_VARIABLES,
+                    scope=".*{}_output/".format(block_name(block_id))
+                )
+            )
+            new_block_var_list.extend(
+                tf.get_collection(
+                    tf.GraphKeys.GLOBAL_VARIABLES,
+                    scope=".*{}_input/".format(block_name(block_id))
                 )
             )
 
@@ -297,8 +314,10 @@ def make_custom_scaffold(stage_id, optimiser_var_list, training_root_directory):
         print("Variables to restore:")
         print("\n".join([var.name for var in restore_var_list]))
         if current_checkpoint is not None:
+            print("Restoring variables from current checkpoint")
             saver_for_restoration.restore(sess, current_checkpoint)
         elif previous_checkpoint is not None:
+            print("Restoring variables from previous checkpoint")
             saver_for_restoration.restore(sess, previous_checkpoint)
 
     # Init_op is dummy since init_fn does the initialisation
@@ -309,25 +328,30 @@ def make_custom_scaffold(stage_id, optimiser_var_list, training_root_directory):
 def get_train_subdirectory(stage_id, training_root_directory):
     return os.path.join(training_root_directory, "stage_{:05d}".format(stage_id))
 
+# Base exponent is 4 since the length of the output from the 1st conv layer is 2^6
 def get_window_length(num_blocks):
-    base_exponent = 2
+    base_exponent = 4
     block_multiplier = 2 * num_blocks
     return 2 ** (base_exponent + block_multiplier)
 
-
-# TODO: sepcify num_blocks in model building functions before running
 if __name__ == "__main__":
+
+    num_blocks = 7
 
     training_data_dir = "data/"
     training_dir = "checkpoints/"
-    amount_to_preview = 50
+    amount_to_preview = 5
 
-    mode = "preview"
+    mode = "train"
+
+    window_size = get_window_length(num_blocks)
+
+    print("Window size: {}".format(window_size))
 
     if mode == "train":
-        infer(training_dir)
-        train(training_data_dir, training_dir)
+        infer(get_train_subdirectory(num_blocks, training_dir), num_blocks)
+        train(training_data_dir, training_dir, num_blocks)
     elif mode == "preview":
         preview(training_dir, amount_to_preview)
     elif mode == "infer":
-        infer(training_dir)
+        infer(training_dir, num_blocks)

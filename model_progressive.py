@@ -3,8 +3,11 @@
 import tensorflow as tf
 import math
 
+# fmap means feature map
 def num_filters(block_id, fmap_base=8192, fmap_decay=1.0, fmap_max=512):
-    return int(min(fmap_base / math.pow(2.0, block_id * fmap_decay), fmap_max))
+    # block_id + 1 is needed since this implementation does not exactly follow the
+    # PGGAN implementation - 1 block outputs 64 samples, thus 8 blocks would be the maximum - 1024x1024
+    return int(min(fmap_base / math.pow(2.0, (block_id + 1) * fmap_decay), fmap_max))
 
 def block_name(block_id):
     return "progressive_block_{}".format(block_id)
@@ -105,7 +108,7 @@ def GANGenerator(
         output = tf.nn.relu(output)
 
     # Scoped for the last block so it does not get used when a bigger network runs
-    with tf.variable_scope(block_name(num_blocks)):
+    with tf.variable_scope(block_name(num_blocks) + "_output"):
         output = to_output(output)
 
     # Need to use an identity matrix because otherwise the batchnorm moving values don't get
@@ -155,6 +158,11 @@ def GANDiscriminator(
         phaseshuffle_rad=0,
         num_blocks=None):
 
+    # Turns the 1/2 channel input into as many channels as the new top
+    # layer would expect from the previous top layer
+    def from_input(x, block_id):
+        return tf.layers.conv1d(x, num_filters(block_id), 1)
+
     batch_size = tf.shape(input)[0]
 
     if use_batchnorm:
@@ -172,6 +180,11 @@ def GANDiscriminator(
 
     # No blending yet
     # Whole network is constructed in the loop
+
+    with tf.variable_scope(block_name(num_blocks) + "_input"):
+        # The +1 is needed so the kernel_shape is going to match what the new top layer expects
+        # For example 64 input to 128 output channels, without the +1 it would be 128 in to 128 out
+        output = from_input(output, num_blocks + 1)
 
     for block_id in range(num_blocks, 0, -1):
         with tf.variable_scope(block_name(block_id)):
