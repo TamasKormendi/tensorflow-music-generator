@@ -153,7 +153,7 @@ def GANDiscriminator(
         kernel_len=25,
         dim=64,
         use_batchnorm=False,
-        phaseshuffle_rad=0):
+        phaseshuffle_rad=2):
 
     batch_size = tf.shape(input)[0]
 

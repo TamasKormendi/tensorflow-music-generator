@@ -155,13 +155,13 @@ def GANDiscriminator(
         kernel_len=25,
         dim=64,
         use_batchnorm=False,
-        phaseshuffle_rad=0,
+        phaseshuffle_rad=2,
         num_blocks=None):
 
     # Turns the 1/2 channel input into as many channels as the new top
     # layer would expect from the previous top layer
     def from_input(x, block_id):
-        return tf.layers.conv1d(x, num_filters(block_id), 1)
+        return tf.layers.conv1d(x, num_filters(block_id), 1, activation=tf.nn.leaky_relu)
 
     batch_size = tf.shape(input)[0]
 
@@ -190,7 +190,8 @@ def GANDiscriminator(
         with tf.variable_scope(block_name(block_id)):
             output = tf.layers.conv1d(output, num_filters(block_id), kernel_len, 4, padding="SAME")
         output = lrelu(output)
-        output = phaseshuffle(output)
+        if block_id > 1:
+            output = phaseshuffle(output)
 
     # Final conv output should be [16, 512]
     output = tf.reshape(output, [batch_size, 4 * 4 * dim * 8])
