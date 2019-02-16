@@ -6,7 +6,7 @@ import math
 # fmap means feature map
 def num_filters(block_id, fmap_base=8192, fmap_decay=1.0, fmap_max=512):
     # block_id + 1 is needed since this implementation does not exactly follow the
-    # PGGAN implementation - 1 block outputs 64 samples, thus 8 blocks would be the maximum - 1024x1024
+    # PGGAN implementation - first block outputs 64 samples, thus 8 blocks would be the maximum - 1024x1024
     return int(min(fmap_base / math.pow(2.0, (block_id + 1) * fmap_decay), fmap_max))
 
 def block_name(block_id):
@@ -19,7 +19,8 @@ def conv1d_transpose(
         kernel_width,
         stride=4,
         padding="same",
-        upsample="zeros"):
+        upsample="zeros",
+        trainable=True):
 
     if upsample == "zeros":
         return tf.layers.conv2d_transpose(
@@ -27,7 +28,8 @@ def conv1d_transpose(
             filters,
             (1, kernel_width),
             strides=(1, stride),
-            padding=padding
+            padding=padding,
+            trainable=trainable
         )[:, 0]
     elif upsample == "nn":  # nn stands for nearest neighbour
         batch_size = tf.shape(inputs)[0]
@@ -44,7 +46,8 @@ def conv1d_transpose(
             filters,
             kernel_width,
             1,
-            padding=padding)
+            padding=padding,
+            trainable=trainable)
     else:
         raise NotImplementedError
 
@@ -63,14 +66,16 @@ def GANGenerator(
         upsample="zeros",
         train=False,
         num_blocks=None,
-        channels=1
+        channels=1,
+        freeze_early_layers=False
         ):
 
+    # 1x1 output conv
     def to_output(x):
         return tf.layers.conv1d(
             x,
             channels,
-            kernel_len,
+            1,
             padding="SAME",
             activation=tf.nn.tanh
         )
@@ -82,18 +87,15 @@ def GANGenerator(
     else:
         batchnorm = lambda x: x
 
-    # Reshape layer/projection
     output = input
 
-    # For now, try with 512 fmaps initially
-
+    # Reshape layer/projection
     # [100] to [16, 1024]
     # 16-length, 1024 channels
     with tf.variable_scope("input_project"):
         output = tf.layers.dense(output, 4 * 4 * dim * 16)
         output = tf.reshape(output, [batch_size, 16, dim * 16])
         output = batchnorm(output)
-
     output = tf.nn.relu(output)
 
     # Every block quadruples the amount of samples
@@ -101,9 +103,23 @@ def GANGenerator(
     # Unlike in the PGGAN repo, the whole network is built in the loop
     # Note: for now it does not do any blending
     # TODO: figure out how to blend audio between training stages
-    for block_id in range(1, num_blocks + 1):
-        with tf.variable_scope(block_name(block_id)):
-            output = conv1d_transpose(output, num_filters(block_id), kernel_len, 4, upsample=upsample)
+    if not freeze_early_layers:
+        for block_id in range(1, num_blocks + 1):
+            with tf.variable_scope(block_name(block_id)):
+                output = conv1d_transpose(output, num_filters(block_id), kernel_len, 4, upsample=upsample)
+                output = batchnorm(output)
+            output = tf.nn.relu(output)
+    else:
+        # Freeze layers from 1 until num_blocks - 1
+        for block_id in range(1, num_blocks):
+            with tf.variable_scope(block_name(block_id)):
+                output = conv1d_transpose(output, num_filters(block_id), kernel_len, 4, upsample=upsample, trainable=False)
+                output = batchnorm(output)
+            output = tf.nn.relu(output)
+
+        # Only make the last layer trainable
+        with tf.variable_scope(block_name(num_blocks)):
+            output = conv1d_transpose(output, num_filters(num_blocks), kernel_len, 4, upsample=upsample)
             output = batchnorm(output)
         output = tf.nn.relu(output)
 
@@ -113,6 +129,7 @@ def GANGenerator(
 
     # Need to use an identity matrix because otherwise the batchnorm moving values don't get
     # placed in the update ops and don't get computed
+    # NOTE: DON'T USE BATCHNORM WITH WGAN-GP
     if train and use_batchnorm:
         update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
         if len(update_ops) != 10:
@@ -156,7 +173,8 @@ def GANDiscriminator(
         dim=64,
         use_batchnorm=False,
         phaseshuffle_rad=2,
-        num_blocks=None):
+        num_blocks=None,
+        freeze_early_layers=False):
 
     # Turns the 1/2 channel input into as many channels as the new top
     # layer would expect from the previous top layer
@@ -186,15 +204,31 @@ def GANDiscriminator(
         # For example 64 input to 128 output channels, without the +1 it would be 128 in to 128 out
         output = from_input(output, num_blocks + 1)
 
-    for block_id in range(num_blocks, 0, -1):
-        with tf.variable_scope(block_name(block_id)):
-            output = tf.layers.conv1d(output, num_filters(block_id), kernel_len, 4, padding="SAME")
+    if not freeze_early_layers:
+        for block_id in range(num_blocks, 0, -1):
+            with tf.variable_scope(block_name(block_id)):
+                output = tf.layers.conv1d(output, num_filters(block_id), kernel_len, 4, padding="SAME")
+            output = lrelu(output)
+            if block_id > 1:
+                output = phaseshuffle(output)
+    else:
+        # Construct trainable top block
+        with tf.variable_scope(block_name(num_blocks)):
+            output = tf.layers.conv1d(output, num_filters(num_blocks), kernel_len, 4, padding="SAME")
         output = lrelu(output)
-        if block_id > 1:
+        if num_blocks > 1:
             output = phaseshuffle(output)
 
-    # Final conv output should be [16, 512]
-    output = tf.reshape(output, [batch_size, 4 * 4 * dim * 8])
+        # Freeze bottom blocks - run the loop from num_blocks - 1
+        for block_id in range(num_blocks - 1, 0, -1):
+            with tf.variable_scope(block_name(block_id)):
+                output = tf.layers.conv1d(output, num_filters(block_id), kernel_len, 4, padding="SAME", trainable=False)
+            output = lrelu(output)
+            if block_id > 1:
+                output = phaseshuffle(output)
+
+    # Final conv output should be [16, fmap_max]
+    output = tf.reshape(output, [batch_size, -1])
 
     # Compute a single output
     with tf.variable_scope("output"):

@@ -19,12 +19,12 @@ D_UPDATES_PER_G_UPDATE = 5
 # Set later in main properly
 window_size = 16384
 # TODO: figure out the highest batch_sizes for each stage that doesn't cause out-of-memory error
-batch_size = 16
+batch_size = 64
 
 # G = generator
 # D = discriminator
 
-def train(training_data_dir, train_dir, stage_id):
+def train(training_data_dir, train_dir, stage_id, freeze_early_layers=False):
     print("Training called")
 
     loader = dataloader.Dataloader(window_size, batch_size, training_data_dir)
@@ -37,7 +37,7 @@ def train(training_data_dir, train_dir, stage_id):
 
     # Generator network
     with tf.variable_scope("G"):
-        G_output = GANGenerator(G_input, train=True, num_blocks=stage_id)
+        G_output = GANGenerator(G_input, train=True, num_blocks=stage_id, freeze_early_layers=freeze_early_layers)
     G_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope="G")
 
     # Write generator summary
@@ -54,12 +54,12 @@ def train(training_data_dir, train_dir, stage_id):
 
     # Discriminator with real input data
     with tf.name_scope("D_real"), tf.variable_scope("D"):
-        D_real_output = GANDiscriminator(x, num_blocks=stage_id)
+        D_real_output = GANDiscriminator(x, num_blocks=stage_id, freeze_early_layers=freeze_early_layers)
     D_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope="D")
 
     # Discriminator with fake input data
     with tf.name_scope("D_fake"), tf.variable_scope("D", reuse=True):
-        D_fake_output = GANDiscriminator(G_output, num_blocks=stage_id)
+        D_fake_output = GANDiscriminator(G_output, num_blocks=stage_id, freeze_early_layers=freeze_early_layers)
 
     # Only use the WGAN-GP loss for now
     G_loss = -tf.reduce_mean(D_fake_output)
@@ -72,7 +72,7 @@ def train(training_data_dir, train_dir, stage_id):
 
     interpolates = x + (alpha * differences)
     with tf.name_scope("D_interpolates"), tf.variable_scope("D", reuse=True):
-        D_interpolates_output = GANDiscriminator(interpolates, num_blocks=stage_id)
+        D_interpolates_output = GANDiscriminator(interpolates, num_blocks=stage_id, freeze_early_layers=freeze_early_layers)
 
     LAMBDA = 10
     gradients = tf.gradients(D_interpolates_output, [interpolates])[0]
@@ -104,15 +104,19 @@ def train(training_data_dir, train_dir, stage_id):
 
     optimiser_vars = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope=var_scope.name)
 
-    scaffold = make_custom_scaffold(stage_id, optimiser_vars, train_dir)
+    scaffold = make_custom_scaffold(stage_id, optimiser_vars, train_dir, freeze_early_layers)
 
+    if freeze_early_layers:
+        print("Early layers frozen")
+    else:
+        print("Training all layers")
 
     # Training
     # TODO: This'll definitely have to be changed
     with tf.train.MonitoredTrainingSession(
-        checkpoint_dir=get_train_subdirectory(stage_id, train_dir),
+        checkpoint_dir=get_train_subdirectory(stage_id, train_dir, freeze_early_layers),
         save_checkpoint_secs=300,
-        save_summaries_secs=300,
+        save_summaries_secs=120,
         scaffold=scaffold) as sess:
         print("Training start")
         while True:
@@ -125,7 +129,7 @@ def train(training_data_dir, train_dir, stage_id):
             sess.run(G_train_op)
             # print("Generator trained")
 
-            print("Both networks trained")
+            # print("Both networks trained")
 
 def infer(train_dir, stage_id):
     infer_dir = os.path.join(train_dir, "infer")
@@ -268,40 +272,50 @@ def preview(train_dir, amount_to_preview):
 
 
 # Stage_id is equivalent to num_blocks for now
-def make_custom_scaffold(stage_id, optimiser_var_list, training_root_directory):
+def make_custom_scaffold(stage_id, optimiser_var_list, training_root_directory, early_layers_frozen):
     restore_var_list = []
     previous_checkpoint = None
-    current_checkpoint = tf.train.latest_checkpoint(get_train_subdirectory(stage_id, training_root_directory))
+    current_checkpoint = tf.train.latest_checkpoint(get_train_subdirectory(stage_id, training_root_directory, early_layers_frozen))
     # Skip var restoration if training only has 1 block and no saved checkpoint
     if stage_id > 1 and current_checkpoint is None:
-        previous_checkpoint = tf.train.latest_checkpoint(get_train_subdirectory(stage_id - 1, training_root_directory))
 
-        number_of_blocks = stage_id
-        prev_num_blocks = stage_id - 1
+        # Check if a frozen checkpoint exists from the current level
+        previous_checkpoint = tf.train.latest_checkpoint(get_train_subdirectory(stage_id, training_root_directory, True))
+        # If yes, restore every non-optimiser variable
+        if previous_checkpoint is not None:
+            restore_var_list = [var for var in tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES)
+                                if var not in set(optimiser_var_list)]
+        # If not, check if a non-frozen one exists from the previous level and restore
+        # every non-optimiser variable that are from the old blocks
+        else:
+            previous_checkpoint = tf.train.latest_checkpoint( get_train_subdirectory(stage_id - 1, training_root_directory, False))
 
-        new_block_var_list = []
-        for block_id in range(prev_num_blocks + 1, number_of_blocks + 1):
-            new_block_var_list.extend(
-                tf.get_collection(
-                    tf.GraphKeys.GLOBAL_VARIABLES,
-                    scope=".*/{}/".format(block_name(block_id))
-                )
-            )
-            new_block_var_list.extend(
-                tf.get_collection(
-                    tf.GraphKeys.GLOBAL_VARIABLES,
-                    scope=".*{}_output/".format(block_name(block_id))
-                )
-            )
-            new_block_var_list.extend(
-                tf.get_collection(
-                    tf.GraphKeys.GLOBAL_VARIABLES,
-                    scope=".*{}_input/".format(block_name(block_id))
-                )
-            )
+            number_of_blocks = stage_id
+            prev_num_blocks = stage_id - 1
 
-        restore_var_list = [var for var in tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES)
-                            if var not in set(optimiser_var_list + new_block_var_list)]
+            new_block_var_list = []
+            for block_id in range(prev_num_blocks + 1, number_of_blocks + 1):
+                new_block_var_list.extend(
+                    tf.get_collection(
+                        tf.GraphKeys.GLOBAL_VARIABLES,
+                        scope=".*/{}/".format(block_name(block_id))
+                    )
+                )
+                new_block_var_list.extend(
+                    tf.get_collection(
+                        tf.GraphKeys.GLOBAL_VARIABLES,
+                        scope=".*{}_output/".format(block_name(block_id))
+                    )
+                )
+                new_block_var_list.extend(
+                    tf.get_collection(
+                        tf.GraphKeys.GLOBAL_VARIABLES,
+                        scope=".*{}_input/".format(block_name(block_id))
+                    )
+                )
+
+            restore_var_list = [var for var in tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES)
+                                if var not in set(optimiser_var_list + new_block_var_list)]
     elif current_checkpoint is not None:
         restore_var_list = [var for var in tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES)]
 
@@ -325,8 +339,11 @@ def make_custom_scaffold(stage_id, optimiser_var_list, training_root_directory):
 
 # Return the name of a possibly existing training subdirectory
 # stage_id corresponds to num_blocks for now
-def get_train_subdirectory(stage_id, training_root_directory):
-    return os.path.join(training_root_directory, "stage_{:05d}".format(stage_id))
+def get_train_subdirectory(stage_id, training_root_directory, early_layers_frozen):
+    if early_layers_frozen:
+        return os.path.join(training_root_directory, "stage_{:05d}_frozen".format(stage_id))
+    else:
+        return os.path.join(training_root_directory, "stage_{:05d}".format(stage_id))
 
 # Base exponent is 4 since the length of the output from the 1st conv layer is 2^6
 def get_window_length(num_blocks):
@@ -336,7 +353,7 @@ def get_window_length(num_blocks):
 
 if __name__ == "__main__":
 
-    num_blocks = 7
+    num_blocks = 5
 
     training_data_dir = "data/"
     training_dir = "checkpoints/"
@@ -348,9 +365,21 @@ if __name__ == "__main__":
 
     print("Window size: {}".format(window_size))
 
+    #TODO: work-in-progress
+    suitable_batch_size_dict_high_vram = {1 : 128,
+                                2 : 128,
+                                3 : 96,
+                                4 : 80,
+                                5 : 64,
+                                6 : 40,
+                                7 : 16,
+                                8 : 8}
+
+    freeze_early_layers = False
+
     if mode == "train":
-        infer(get_train_subdirectory(num_blocks, training_dir), num_blocks)
-        train(training_data_dir, training_dir, num_blocks)
+        infer(get_train_subdirectory(num_blocks, training_dir, freeze_early_layers), num_blocks)
+        train(training_data_dir, training_dir, num_blocks, freeze_early_layers=freeze_early_layers)
     elif mode == "preview":
         preview(training_dir, amount_to_preview)
     elif mode == "infer":
