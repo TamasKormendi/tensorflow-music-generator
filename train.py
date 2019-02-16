@@ -105,17 +105,17 @@ def train(training_data_dir, train_dir):
     with tf.train.MonitoredTrainingSession(
         checkpoint_dir=train_dir,
         save_checkpoint_secs=300,
-        save_summaries_secs=300) as sess:
+        save_summaries_secs=120) as sess:
         print("Training start")
         while True:
 
             # Train discriminator
             for i in range(D_UPDATES_PER_G_UPDATE):
                 sess.run(D_train_op)
-            print("Discriminator trained")
+            #print("Discriminator trained")
 
             sess.run(G_train_op)
-            print("Generator trained")
+            #print("Generator trained")
 
 def infer(train_dir):
     infer_dir = os.path.join(train_dir, "infer")
@@ -260,9 +260,9 @@ if __name__ == "__main__":
 
     training_data_dir = "data/"
     training_dir = "checkpoints/"
-    amount_to_preview = 50
+    amount_to_preview = 5
 
-    mode = "preview"
+    mode = "train"
 
     if mode == "train":
         infer(training_dir)
