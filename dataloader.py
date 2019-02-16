@@ -119,6 +119,8 @@ class Dataloader(object):
         # Create a dataset and batch it
         dataset = tf.data.Dataset.from_tensor_slices(self.all_sliced_samples)
 
+        dataset = dataset.shuffle(buffer_size=4096)
+
         # If (self.batch_size, True) the last batch gets dropped if size < normal batch_size
         # Current implementation is way too reliant on fixed batch sizes so the remainder is dropped
         dataset = dataset.batch(self.batch_size, True)
