@@ -12,6 +12,12 @@ def num_filters(block_id, fmap_base=8192, fmap_decay=1.0, fmap_max=512):
 def block_name(block_id):
     return "progressive_block_{}".format(block_id)
 
+# Made generated samples extremely loud - can it be made more reasonable?
+# For example, normalising the values strictly to -1, 1 might make sense to try
+def sample_norm(samples, epsilon=1.0e-8):
+    # return samples * tf.rsqrt(tf.reduce_mean(tf.square(samples), axis=2, keepdims=True) + epsilon)
+    return samples
+
 # Now TF also has https://www.tensorflow.org/api_docs/python/tf/contrib/nn/conv1d_transpose which might be worth a look
 def conv1d_transpose(
         inputs,
@@ -96,7 +102,7 @@ def GANGenerator(
         output = tf.layers.dense(output, 4 * 4 * dim * 16)
         output = tf.reshape(output, [batch_size, 16, dim * 16])
         output = batchnorm(output)
-    output = tf.nn.relu(output)
+    output = sample_norm(tf.nn.leaky_relu(output))
 
     # Every block quadruples the amount of samples
 
@@ -108,20 +114,20 @@ def GANGenerator(
             with tf.variable_scope(block_name(block_id)):
                 output = conv1d_transpose(output, num_filters(block_id), kernel_len, 4, upsample=upsample)
                 output = batchnorm(output)
-            output = tf.nn.relu(output)
+            output = sample_norm(tf.nn.leaky_relu(output))
     else:
         # Freeze layers from 1 until num_blocks - 1
         for block_id in range(1, num_blocks):
             with tf.variable_scope(block_name(block_id)):
                 output = conv1d_transpose(output, num_filters(block_id), kernel_len, 4, upsample=upsample, trainable=False)
                 output = batchnorm(output)
-            output = tf.nn.relu(output)
+            output = sample_norm(tf.nn.leaky_relu(output))
 
         # Only make the last layer trainable
         with tf.variable_scope(block_name(num_blocks)):
             output = conv1d_transpose(output, num_filters(num_blocks), kernel_len, 4, upsample=upsample)
             output = batchnorm(output)
-        output = tf.nn.relu(output)
+        output = sample_norm(tf.nn.leaky_relu(output))
 
     # Scoped for the last block so it does not get used when a bigger network runs
     with tf.variable_scope(block_name(num_blocks) + "_output"):
@@ -172,7 +178,7 @@ def GANDiscriminator(
         kernel_len=25,
         dim=64,
         use_batchnorm=False,
-        phaseshuffle_rad=2,
+        phaseshuffle_rad=0,
         num_blocks=None,
         freeze_early_layers=False):
 

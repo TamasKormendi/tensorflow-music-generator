@@ -353,7 +353,9 @@ def get_window_length(num_blocks):
 
 if __name__ == "__main__":
 
-    num_blocks = 5
+    num_blocks = 1
+
+    assert (num_blocks >= 1 and num_blocks < 9), "The number of blocks should be between 1 and 8 inclusive, it was {}".format(num_blocks)
 
     training_data_dir = "data/"
     training_dir = "checkpoints/"
@@ -367,7 +369,7 @@ if __name__ == "__main__":
 
     #TODO: work-in-progress
     suitable_batch_size_dict_high_vram = {1 : 128,
-                                2 : 128,
+                                2 : 112,
                                 3 : 96,
                                 4 : 80,
                                 5 : 64,
@@ -375,7 +377,13 @@ if __name__ == "__main__":
                                 7 : 16,
                                 8 : 8}
 
-    freeze_early_layers = False
+    batch_size = suitable_batch_size_dict_high_vram[num_blocks]
+
+    if num_blocks < 2:
+        freeze_early_layers = False
+    else:
+        # TODO: make this user-specifiable
+        freeze_early_layers = False
 
     if mode == "train":
         infer(get_train_subdirectory(num_blocks, training_dir, freeze_early_layers), num_blocks)
