@@ -74,6 +74,10 @@ def train(training_data_dir, train_dir, stage_id, freeze_early_layers=False):
     with tf.name_scope("D_interpolates"), tf.variable_scope("D", reuse=True):
         D_interpolates_output = GANDiscriminator(interpolates, num_blocks=stage_id, freeze_early_layers=freeze_early_layers)
 
+    tf.summary.scalar("Output/real_output", tf.reduce_mean(D_real_output))
+    tf.summary.scalar("Output/fake_output", tf.reduce_mean(D_fake_output))
+    tf.summary.scalar("Output/mixed_output", tf.reduce_mean(D_interpolates_output))
+
     LAMBDA = 10
     gradients = tf.gradients(D_interpolates_output, [interpolates])[0]
     slopes = tf.sqrt(tf.reduce_sum(tf.square(gradients), reduction_indices=[1, 2]))
@@ -81,8 +85,8 @@ def train(training_data_dir, train_dir, stage_id, freeze_early_layers=False):
 
     D_loss += LAMBDA * gradient_penalty
 
-    tf.summary.scalar("Generator_loss", G_loss)
-    tf.summary.scalar("Discriminator_loss", D_loss)
+    tf.summary.scalar("Loss/Generator_loss", G_loss)
+    tf.summary.scalar("Loss/Discriminator_loss", D_loss)
 
     with tf.variable_scope("optimiser_vars") as var_scope:
         # Optimisers - pretty sure for progressive growing changes might be needed, look at the PGGAN paper
@@ -353,7 +357,7 @@ def get_window_length(num_blocks):
 
 if __name__ == "__main__":
 
-    num_blocks = 1
+    num_blocks = 6
 
     assert (num_blocks >= 1 and num_blocks < 9), "The number of blocks should be between 1 and 8 inclusive, it was {}".format(num_blocks)
 

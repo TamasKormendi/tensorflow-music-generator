@@ -4,10 +4,11 @@ import tensorflow as tf
 import math
 
 # fmap means feature map
-def num_filters(block_id, fmap_base=8192, fmap_decay=1.0, fmap_max=512):
+def num_filters(block_id, fmap_base=8192, fmap_decay=1.0, fmap_max=256):
     # block_id + 1 is needed since this implementation does not exactly follow the
     # PGGAN implementation - first block outputs 64 samples, thus 8 blocks would be the maximum - 1024x1024
-    return int(min(fmap_base / math.pow(2.0, (block_id + 1) * fmap_decay), fmap_max))
+    # return int(min(fmap_base / math.pow(2.0, (block_id + 1) * fmap_decay), fmap_max))
+    return 1024 // (2 ** block_id)
 
 def block_name(block_id):
     return "progressive_block_{}".format(block_id)
@@ -15,8 +16,8 @@ def block_name(block_id):
 # Made generated samples extremely loud - can it be made more reasonable?
 # For example, normalising the values strictly to -1, 1 might make sense to try
 def sample_norm(samples, epsilon=1.0e-8):
-    # return samples * tf.rsqrt(tf.reduce_mean(tf.square(samples), axis=2, keepdims=True) + epsilon)
-    return samples
+    return samples * tf.rsqrt(tf.reduce_mean(tf.square(samples), axis=2, keepdims=True) + epsilon)
+    # return samples
 
 # Now TF also has https://www.tensorflow.org/api_docs/python/tf/contrib/nn/conv1d_transpose which might be worth a look
 def conv1d_transpose(
@@ -102,7 +103,7 @@ def GANGenerator(
         output = tf.layers.dense(output, 4 * 4 * dim * 16)
         output = tf.reshape(output, [batch_size, 16, dim * 16])
         output = batchnorm(output)
-    output = sample_norm(tf.nn.leaky_relu(output))
+    output = tf.nn.relu(output)
 
     # Every block quadruples the amount of samples
 
@@ -114,20 +115,20 @@ def GANGenerator(
             with tf.variable_scope(block_name(block_id)):
                 output = conv1d_transpose(output, num_filters(block_id), kernel_len, 4, upsample=upsample)
                 output = batchnorm(output)
-            output = sample_norm(tf.nn.leaky_relu(output))
+            output = tf.nn.relu(output)
     else:
         # Freeze layers from 1 until num_blocks - 1
         for block_id in range(1, num_blocks):
             with tf.variable_scope(block_name(block_id)):
                 output = conv1d_transpose(output, num_filters(block_id), kernel_len, 4, upsample=upsample, trainable=False)
                 output = batchnorm(output)
-            output = sample_norm(tf.nn.leaky_relu(output))
+            output = tf.nn.relu(output)
 
         # Only make the last layer trainable
         with tf.variable_scope(block_name(num_blocks)):
             output = conv1d_transpose(output, num_filters(num_blocks), kernel_len, 4, upsample=upsample)
             output = batchnorm(output)
-        output = sample_norm(tf.nn.leaky_relu(output))
+        output = tf.nn.relu(output)
 
     # Scoped for the last block so it does not get used when a bigger network runs
     with tf.variable_scope(block_name(num_blocks) + "_output"):
@@ -208,19 +209,19 @@ def GANDiscriminator(
     with tf.variable_scope(block_name(num_blocks) + "_input"):
         # The +1 is needed so the kernel_shape is going to match what the new top layer expects
         # For example 64 input to 128 output channels, without the +1 it would be 128 in to 128 out
-        output = from_input(output, num_blocks + 1)
+        output = from_input(output, num_blocks)
 
     if not freeze_early_layers:
         for block_id in range(num_blocks, 0, -1):
             with tf.variable_scope(block_name(block_id)):
-                output = tf.layers.conv1d(output, num_filters(block_id), kernel_len, 4, padding="SAME")
+                output = tf.layers.conv1d(output, num_filters(block_id - 1), kernel_len, 4, padding="SAME")
             output = lrelu(output)
             if block_id > 1:
                 output = phaseshuffle(output)
     else:
         # Construct trainable top block
         with tf.variable_scope(block_name(num_blocks)):
-            output = tf.layers.conv1d(output, num_filters(num_blocks), kernel_len, 4, padding="SAME")
+            output = tf.layers.conv1d(output, num_filters(num_blocks - 1), kernel_len, 4, padding="SAME")
         output = lrelu(output)
         if num_blocks > 1:
             output = phaseshuffle(output)
@@ -228,7 +229,7 @@ def GANDiscriminator(
         # Freeze bottom blocks - run the loop from num_blocks - 1
         for block_id in range(num_blocks - 1, 0, -1):
             with tf.variable_scope(block_name(block_id)):
-                output = tf.layers.conv1d(output, num_filters(block_id), kernel_len, 4, padding="SAME", trainable=False)
+                output = tf.layers.conv1d(output, num_filters(block_id - 1), kernel_len, 4, padding="SAME", trainable=False)
             output = lrelu(output)
             if block_id > 1:
                 output = phaseshuffle(output)
