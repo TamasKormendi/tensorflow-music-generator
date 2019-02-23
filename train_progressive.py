@@ -6,7 +6,7 @@ import tensorflow as tf
 import pickle
 
 from model_progressive import GANGenerator, GANDiscriminator, block_name
-import dataloader
+import dataloader_progressive as dataloader
 import utils
 
 
@@ -29,7 +29,9 @@ def train(training_data_dir, train_dir, stage_id, freeze_early_layers=False):
 
     loader = dataloader.Dataloader(window_size, batch_size, training_data_dir)
 
-    x = loader.get_next()
+    iterator = loader.get_next()
+
+    x = iterator.get_next()
 
     print(x.get_shape())
 
@@ -115,12 +117,15 @@ def train(training_data_dir, train_dir, stage_id, freeze_early_layers=False):
     else:
         print("Training all layers")
 
+    iterator_init_hook = IteratorInitiasliserHook(iterator, loader.all_sliced_samples)
+
     # Training
     # TODO: This'll definitely have to be changed
     with tf.train.MonitoredTrainingSession(
         checkpoint_dir=get_train_subdirectory(stage_id, train_dir, freeze_early_layers),
         save_checkpoint_secs=300,
         save_summaries_secs=120,
+        hooks=[iterator_init_hook],
         scaffold=scaffold) as sess:
         print("Training start")
         while True:
@@ -354,6 +359,17 @@ def get_window_length(num_blocks):
     base_exponent = 4
     block_multiplier = 2 * num_blocks
     return 2 ** (base_exponent + block_multiplier)
+
+# https://github.com/tensorflow/tensorflow/issues/12859
+class IteratorInitiasliserHook(tf.train.SessionRunHook):
+    def __init__(self, iterator, data):
+        self.iterator = iterator
+        self.data = data
+    def begin(self):
+        self.initialiser = self.iterator.initializer
+    def after_create_session(self, session, coord):
+        del coord
+        session.run(self.initialiser, feed_dict={"data:0": self.data})
 
 if __name__ == "__main__":
 
