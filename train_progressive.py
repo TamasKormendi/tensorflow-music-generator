@@ -38,9 +38,26 @@ def train(training_data_dir, train_dir, stage_id, freeze_early_layers=False):
     G_input = tf.random_uniform([batch_size, G_INIT_INPUT_SIZE], -1., 1., dtype=tf.float32)
 
     # Generator network
-    with tf.variable_scope("G"):
+    G_input = tf.cast(G_input, tf.float16)
+    with tf.variable_scope("G", custom_getter=float32_variable_storage_getter):
         G_output = GANGenerator(G_input, train=True, num_blocks=stage_id, freeze_early_layers=freeze_early_layers)
     G_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope="G")
+
+    # Discriminator with real input data
+    x = tf.cast(x, tf.float16)
+    with tf.name_scope("D_real"), tf.variable_scope("D", custom_getter=float32_variable_storage_getter):
+        D_real_output = GANDiscriminator(x, num_blocks=stage_id, freeze_early_layers=freeze_early_layers)
+    D_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope="D")
+
+    # Discriminator with fake input data
+    # G_output is already in fp16
+    with tf.name_scope("D_fake"), tf.variable_scope("D", reuse=True, custom_getter=float32_variable_storage_getter):
+        D_fake_output = GANDiscriminator(G_output, num_blocks=stage_id, freeze_early_layers=freeze_early_layers)
+
+    x = tf.cast(x, tf.float32)
+    G_output = tf.cast(G_output, tf.float32)
+    D_real_output = tf.cast(D_real_output, tf.float32)
+    D_fake_output = tf.cast(D_fake_output, tf.float32)
 
     # Write generator summary
     tf.summary.audio("real_input", x, SAMPLING_RATE)
@@ -54,15 +71,6 @@ def train(training_data_dir, train_dir, stage_id, freeze_early_layers=False):
     tf.summary.scalar("real_input_rms", tf.reduce_mean(real_input_rms))
     tf.summary.scalar("G_output_rms", tf.reduce_mean(G_output_rms))
 
-    # Discriminator with real input data
-    with tf.name_scope("D_real"), tf.variable_scope("D"):
-        D_real_output = GANDiscriminator(x, num_blocks=stage_id, freeze_early_layers=freeze_early_layers)
-    D_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope="D")
-
-    # Discriminator with fake input data
-    with tf.name_scope("D_fake"), tf.variable_scope("D", reuse=True):
-        D_fake_output = GANDiscriminator(G_output, num_blocks=stage_id, freeze_early_layers=freeze_early_layers)
-
     # Only use the WGAN-GP loss for now
     G_loss = -tf.reduce_mean(D_fake_output)
     D_loss = tf.reduce_mean(D_fake_output) - tf.reduce_mean(D_real_output)
@@ -73,15 +81,23 @@ def train(training_data_dir, train_dir, stage_id, freeze_early_layers=False):
     differences = G_output - x
 
     interpolates = x + (alpha * differences)
-    with tf.name_scope("D_interpolates"), tf.variable_scope("D", reuse=True):
+    interpolates = tf.cast(interpolates, tf.float16)
+    with tf.name_scope("D_interpolates"), tf.variable_scope("D", reuse=True, custom_getter=float32_variable_storage_getter):
         D_interpolates_output = GANDiscriminator(interpolates, num_blocks=stage_id, freeze_early_layers=freeze_early_layers)
+    # interpolates = tf.cast(interpolates, tf.float32)
+    # D_interpolates_output = tf.cast(D_interpolates_output, tf.float32)
 
     tf.summary.scalar("Output/real_output", tf.reduce_mean(D_real_output))
     tf.summary.scalar("Output/fake_output", tf.reduce_mean(D_fake_output))
     tf.summary.scalar("Output/mixed_output", tf.reduce_mean(D_interpolates_output))
 
+    print(type(interpolates))
+    print(type(D_interpolates_output))
+
     LAMBDA = 10
     gradients = tf.gradients(D_interpolates_output, [interpolates])[0]
+    gradients = tf.cast(gradients, tf.float32)
+    print(type(gradients))
     slopes = tf.sqrt(tf.reduce_sum(tf.square(gradients), reduction_indices=[1, 2]))
     gradient_penalty = tf.reduce_mean((slopes - 1.) ** 2.)
 
@@ -103,10 +119,20 @@ def train(training_data_dir, train_dir, stage_id, freeze_early_layers=False):
             beta2=0.9
         )
 
+        loss_scale = 128.0
+
+        G_gradients, G_variables = zip(*G_opt.compute_gradients(G_loss * loss_scale, var_list=G_vars))
+        G_gradients = [gradient / loss_scale for gradient in G_gradients]
+        G_train_op = G_opt.apply_gradients(zip(G_gradients, G_variables), global_step=tf.train.get_or_create_global_step())
+
+        D_gradients, D_variables = zip(*D_opt.compute_gradients(D_loss * loss_scale, var_list=D_vars))
+        D_gradients = [gradient / loss_scale for gradient in D_gradients]
+        D_train_op = D_opt.apply_gradients(zip(D_gradients, D_variables))
+
         # Training ops - need to specify the var_list so it does not default to all vars within TRAINABLE_VARIABLES
         # See: https://www.tensorflow.org/api_docs/python/tf/train/AdamOptimizer#minimize
-        G_train_op = G_opt.minimize(G_loss, var_list=G_vars, global_step=tf.train.get_or_create_global_step())
-        D_train_op = D_opt.minimize(D_loss, var_list=D_vars)
+        # G_train_op = G_opt.minimize(G_loss, var_list=G_vars, global_step=tf.train.get_or_create_global_step())
+        # D_train_op = D_opt.minimize(D_loss, var_list=D_vars)
 
     optimiser_vars = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope=var_scope.name)
 
@@ -156,7 +182,7 @@ def infer(train_dir, stage_id):
     flat_pad = tf.placeholder(tf.int32, [], name="flat_pad")
 
     # Run the generator
-    with tf.variable_scope("G"):
+    with tf.variable_scope("G", custom_getter=float32_variable_storage_getter):
         generator_output = GANGenerator(input_placeholder, train=False, num_blocks=stage_id)
     generator_output = tf.identity(generator_output, name="G_z")
 
@@ -370,6 +396,23 @@ class IteratorInitiasliserHook(tf.train.SessionRunHook):
     def after_create_session(self, session, coord):
         del coord
         session.run(self.initialiser, feed_dict={"data:0": self.data})
+
+# https://github.com/khcs/fp16-demo-tf/blob/master/mnist_softmax_deep_conv_fp16_advanced.py
+def float32_variable_storage_getter(getter, name, shape=None, dtype=None,
+                                    initializer=None, regularizer=None,
+                                    trainable=True,
+                                    *args, **kwargs):
+  """Custom variable getter that forces trainable variables to be stored in
+  float32 precision and then casts them to the training precision.
+  """
+  storage_dtype = tf.float32 if trainable else dtype
+  variable = getter(name, shape, dtype=storage_dtype,
+                    initializer=initializer, regularizer=regularizer,
+                    trainable=trainable,
+                    *args, **kwargs)
+  if trainable and dtype != tf.float32:
+    variable = tf.cast(variable, dtype)
+  return variable
 
 if __name__ == "__main__":
 
