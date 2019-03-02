@@ -4,11 +4,27 @@ import tensorflow as tf
 import math
 
 # fmap means feature map
-def num_filters(block_id, fmap_base=8192, fmap_decay=1.0, fmap_max=256):
+def num_filters(block_id, fmap_base=8192, fmap_decay=1.0, fmap_max=256, smooth_later_fmaps=True):
     # block_id + 1 is needed since this implementation does not exactly follow the
     # PGGAN implementation - first block outputs 64 samples, thus 8 blocks would be the maximum - 1024x1024
     # return int(min(fmap_base / math.pow(2.0, (block_id + 1) * fmap_decay), fmap_max))
-    return 1024 // (2 ** block_id)
+    if smooth_later_fmaps:
+        if block_id < 5:
+            return 1024 // (2 ** block_id)
+        else:
+            base_filters = num_filters(4)
+
+            working_block_id = block_id - 4
+            # Ceiling division
+            exponent = -(-working_block_id // 2)
+            divided_filters = base_filters // (2 ** (exponent - 1))
+
+            if block_id % 2 != 0:
+                return int(0.75 * divided_filters)
+            else:
+                return int(0.5 * divided_filters)
+    else:
+        return 1024 // (2 ** block_id)
 
 def block_name(block_id):
     return "progressive_block_{}".format(block_id)
