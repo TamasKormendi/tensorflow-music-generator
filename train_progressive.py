@@ -24,7 +24,7 @@ batch_size = 64
 # G = generator
 # D = discriminator
 
-def train(training_data_dir, train_dir, stage_id, freeze_early_layers=False):
+def train(training_data_dir, train_dir, stage_id, freeze_early_layers=False, use_mixed_precision_training = False):
     print("Training called")
 
     loader = dataloader.Dataloader(window_size, batch_size, training_data_dir)
@@ -37,27 +37,44 @@ def train(training_data_dir, train_dir, stage_id, freeze_early_layers=False):
 
     G_input = tf.random_uniform([batch_size, G_INIT_INPUT_SIZE], -1., 1., dtype=tf.float32)
 
-    # Generator network
-    G_input = tf.cast(G_input, tf.float16)
-    with tf.variable_scope("G", custom_getter=float32_variable_storage_getter):
-        G_output = GANGenerator(G_input, train=True, num_blocks=stage_id, freeze_early_layers=freeze_early_layers)
-    G_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope="G")
+    if use_mixed_precision_training:
+        # Generator network
+        G_input = tf.cast(G_input, tf.float16)
+        with tf.variable_scope("G", custom_getter=float32_variable_storage_getter):
+            G_output = GANGenerator(G_input, train=True, num_blocks=stage_id, freeze_early_layers=freeze_early_layers)
+        G_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope="G")
 
-    # Discriminator with real input data
-    x = tf.cast(x, tf.float16)
-    with tf.name_scope("D_real"), tf.variable_scope("D", custom_getter=float32_variable_storage_getter):
-        D_real_output = GANDiscriminator(x, num_blocks=stage_id, freeze_early_layers=freeze_early_layers)
-    D_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope="D")
+        # Discriminator with real input data
+        x = tf.cast(x, tf.float16)
+        with tf.name_scope("D_real"), tf.variable_scope("D", custom_getter=float32_variable_storage_getter):
+            D_real_output = GANDiscriminator(x, num_blocks=stage_id, freeze_early_layers=freeze_early_layers)
+        D_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope="D")
 
-    # Discriminator with fake input data
-    # G_output is already in fp16
-    with tf.name_scope("D_fake"), tf.variable_scope("D", reuse=True, custom_getter=float32_variable_storage_getter):
-        D_fake_output = GANDiscriminator(G_output, num_blocks=stage_id, freeze_early_layers=freeze_early_layers)
+        # Discriminator with fake input data
+        # G_output is already in fp16
+        with tf.name_scope("D_fake"), tf.variable_scope("D", reuse=True, custom_getter=float32_variable_storage_getter):
+            D_fake_output = GANDiscriminator(G_output, num_blocks=stage_id, freeze_early_layers=freeze_early_layers)
 
-    x = tf.cast(x, tf.float32)
-    G_output = tf.cast(G_output, tf.float32)
-    D_real_output = tf.cast(D_real_output, tf.float32)
-    D_fake_output = tf.cast(D_fake_output, tf.float32)
+        x = tf.cast(x, tf.float32)
+        G_output = tf.cast(G_output, tf.float32)
+        D_real_output = tf.cast(D_real_output, tf.float32)
+        D_fake_output = tf.cast(D_fake_output, tf.float32)
+    else:
+        # Generator network
+        with tf.variable_scope("G"):
+            G_output = GANGenerator(G_input, train=True, num_blocks=stage_id, freeze_early_layers=freeze_early_layers)
+        G_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope="G")
+
+        # Discriminator with real input data
+        with tf.name_scope("D_real"), tf.variable_scope("D"):
+            D_real_output = GANDiscriminator(x, num_blocks=stage_id, freeze_early_layers=freeze_early_layers)
+        D_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope="D")
+
+        # Discriminator with fake input data
+        with tf.name_scope("D_fake"), tf.variable_scope("D", reuse=True):
+            D_fake_output = GANDiscriminator(G_output, num_blocks=stage_id, freeze_early_layers=freeze_early_layers)
+
+
 
     # Write generator summary
     tf.summary.audio("real_input", x, SAMPLING_RATE)
@@ -81,27 +98,35 @@ def train(training_data_dir, train_dir, stage_id, freeze_early_layers=False):
     differences = G_output - x
 
     interpolates = x + (alpha * differences)
-    interpolates = tf.cast(interpolates, tf.float16)
-    with tf.name_scope("D_interpolates"), tf.variable_scope("D", reuse=True, custom_getter=float32_variable_storage_getter):
-        D_interpolates_output = GANDiscriminator(interpolates, num_blocks=stage_id, freeze_early_layers=freeze_early_layers)
-    # interpolates = tf.cast(interpolates, tf.float32)
-    # D_interpolates_output = tf.cast(D_interpolates_output, tf.float32)
+    LAMBDA = 10
+
+    if use_mixed_precision_training:
+        interpolates = tf.cast(interpolates, tf.float16)
+        with tf.name_scope("D_interpolates"), tf.variable_scope("D", reuse=True, custom_getter=float32_variable_storage_getter):
+            D_interpolates_output = GANDiscriminator(interpolates, num_blocks=stage_id, freeze_early_layers=freeze_early_layers)
+        # interpolates = tf.cast(interpolates, tf.float32)
+        # D_interpolates_output = tf.cast(D_interpolates_output, tf.float32)
+
+
+        gradients = tf.gradients(D_interpolates_output, [interpolates])[0]
+        gradients = tf.cast(gradients, tf.float32)
+        slopes = tf.sqrt(tf.reduce_sum(tf.square(gradients), reduction_indices=[1, 2]))
+        gradient_penalty = tf.reduce_mean((slopes - 1.) ** 2.)
+
+        D_loss += LAMBDA * gradient_penalty
+    else:
+        with tf.name_scope("D_interpolates"), tf.variable_scope("D", reuse=True):
+            D_interpolates_output = GANDiscriminator(interpolates, num_blocks=stage_id, freeze_early_layers=freeze_early_layers)
+
+        gradients = tf.gradients(D_interpolates_output, [interpolates])[0]
+        slopes = tf.sqrt(tf.reduce_sum(tf.square(gradients), reduction_indices=[1, 2]))
+        gradient_penalty = tf.reduce_mean((slopes - 1.) ** 2.)
+
+        D_loss += LAMBDA * gradient_penalty
 
     tf.summary.scalar("Output/real_output", tf.reduce_mean(D_real_output))
     tf.summary.scalar("Output/fake_output", tf.reduce_mean(D_fake_output))
     tf.summary.scalar("Output/mixed_output", tf.reduce_mean(D_interpolates_output))
-
-    print(type(interpolates))
-    print(type(D_interpolates_output))
-
-    LAMBDA = 10
-    gradients = tf.gradients(D_interpolates_output, [interpolates])[0]
-    gradients = tf.cast(gradients, tf.float32)
-    print(type(gradients))
-    slopes = tf.sqrt(tf.reduce_sum(tf.square(gradients), reduction_indices=[1, 2]))
-    gradient_penalty = tf.reduce_mean((slopes - 1.) ** 2.)
-
-    D_loss += LAMBDA * gradient_penalty
 
     tf.summary.scalar("Loss/Generator_loss", G_loss)
     tf.summary.scalar("Loss/Discriminator_loss", D_loss)
@@ -119,20 +144,23 @@ def train(training_data_dir, train_dir, stage_id, freeze_early_layers=False):
             beta2=0.9
         )
 
-        loss_scale = 128.0
+        if use_mixed_precision_training:
+            loss_scale = 32.0
 
-        G_gradients, G_variables = zip(*G_opt.compute_gradients(G_loss * loss_scale, var_list=G_vars))
-        G_gradients = [gradient / loss_scale for gradient in G_gradients]
-        G_train_op = G_opt.apply_gradients(zip(G_gradients, G_variables), global_step=tf.train.get_or_create_global_step())
+            G_gradients, G_variables = zip(*G_opt.compute_gradients(G_loss * loss_scale, var_list=G_vars))
+            G_gradients = [gradient / loss_scale for gradient in G_gradients]
+            G_train_op = G_opt.apply_gradients(zip(G_gradients, G_variables), global_step=tf.train.get_or_create_global_step())
 
-        D_gradients, D_variables = zip(*D_opt.compute_gradients(D_loss * loss_scale, var_list=D_vars))
-        D_gradients = [gradient / loss_scale for gradient in D_gradients]
-        D_train_op = D_opt.apply_gradients(zip(D_gradients, D_variables))
+            loss_scale_discriminator = 32.0
 
-        # Training ops - need to specify the var_list so it does not default to all vars within TRAINABLE_VARIABLES
-        # See: https://www.tensorflow.org/api_docs/python/tf/train/AdamOptimizer#minimize
-        # G_train_op = G_opt.minimize(G_loss, var_list=G_vars, global_step=tf.train.get_or_create_global_step())
-        # D_train_op = D_opt.minimize(D_loss, var_list=D_vars)
+            D_gradients, D_variables = zip(*D_opt.compute_gradients(D_loss * loss_scale_discriminator, var_list=D_vars))
+            D_gradients = [gradient / loss_scale_discriminator for gradient in D_gradients]
+            D_train_op = D_opt.apply_gradients(zip(D_gradients, D_variables))
+        else:
+            # Training ops - need to specify the var_list so it does not default to all vars within TRAINABLE_VARIABLES
+            # See: https://www.tensorflow.org/api_docs/python/tf/train/AdamOptimizer#minimize
+            G_train_op = G_opt.minimize(G_loss, var_list=G_vars, global_step=tf.train.get_or_create_global_step())
+            D_train_op = D_opt.minimize(D_loss, var_list=D_vars)
 
     optimiser_vars = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope=var_scope.name)
 
@@ -166,7 +194,7 @@ def train(training_data_dir, train_dir, stage_id, freeze_early_layers=False):
 
             # print("Both networks trained")
 
-def infer(train_dir, stage_id):
+def infer(train_dir, stage_id, use_mixed_precision_training=False):
     infer_dir = os.path.join(train_dir, "infer")
     if not os.path.isdir(infer_dir):
         os.makedirs(infer_dir)
@@ -182,8 +210,12 @@ def infer(train_dir, stage_id):
     flat_pad = tf.placeholder(tf.int32, [], name="flat_pad")
 
     # Run the generator
-    with tf.variable_scope("G", custom_getter=float32_variable_storage_getter):
-        generator_output = GANGenerator(input_placeholder, train=False, num_blocks=stage_id)
+    if use_mixed_precision_training:
+        with tf.variable_scope("G", custom_getter=float32_variable_storage_getter):
+            generator_output = GANGenerator(input_placeholder, train=False, num_blocks=stage_id)
+    else:
+        with tf.variable_scope("G"):
+            generator_output = GANGenerator(input_placeholder, train=False, num_blocks=stage_id)
     generator_output = tf.identity(generator_output, name="G_z")
 
     # Flatten batch and pad it so there is a pause between generated samples
@@ -203,7 +235,9 @@ def infer(train_dir, stage_id):
 
     # Create saver
     G_vars = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope="G")
-    global_step = tf.train.get_or_create_global_step()
+    # Need to scope the global_step to the same scope that it has in the train function
+    with tf.variable_scope("optimiser_vars") as var_scope:
+        global_step = tf.train.get_or_create_global_step()
     saver = tf.train.Saver(G_vars + [global_step])
 
     # Export graph
@@ -417,18 +451,22 @@ def float32_variable_storage_getter(getter, name, shape=None, dtype=None,
 if __name__ == "__main__":
 
     num_blocks = 6
-
     assert (num_blocks >= 1 and num_blocks < 9), "The number of blocks should be between 1 and 8 inclusive, it was {}".format(num_blocks)
 
     training_data_dir = "data/"
     training_dir = "checkpoints/"
     amount_to_preview = 5
-
     mode = "train"
-
     window_size = get_window_length(num_blocks)
+    use_mixed_precision_training = False
 
     print("Window size: {}".format(window_size))
+
+    if num_blocks < 2:
+        freeze_early_layers = False
+    else:
+        # TODO: make this user-specifiable
+        freeze_early_layers = False
 
     #TODO: work-in-progress
     suitable_batch_size_dict_high_vram = {1 : 128,
@@ -442,16 +480,11 @@ if __name__ == "__main__":
 
     batch_size = suitable_batch_size_dict_high_vram[num_blocks]
 
-    if num_blocks < 2:
-        freeze_early_layers = False
-    else:
-        # TODO: make this user-specifiable
-        freeze_early_layers = False
 
     if mode == "train":
-        infer(get_train_subdirectory(num_blocks, training_dir, freeze_early_layers), num_blocks)
-        train(training_data_dir, training_dir, num_blocks, freeze_early_layers=freeze_early_layers)
+        infer(get_train_subdirectory(num_blocks, training_dir, freeze_early_layers), num_blocks, use_mixed_precision_training=use_mixed_precision_training)
+        train(training_data_dir, training_dir, num_blocks, freeze_early_layers=freeze_early_layers, use_mixed_precision_training=use_mixed_precision_training)
     elif mode == "preview":
-        preview(training_dir, amount_to_preview)
+        preview(get_train_subdirectory(num_blocks, training_dir, freeze_early_layers), amount_to_preview)
     elif mode == "infer":
-        infer(training_dir, num_blocks)
+        infer(get_train_subdirectory(num_blocks, training_dir, freeze_early_layers), num_blocks,  use_mixed_precision_training=use_mixed_precision_training)
