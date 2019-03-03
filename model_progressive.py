@@ -119,7 +119,7 @@ def GANGenerator(
         output = tf.layers.dense(output, 4 * 4 * dim * 16)
         output = tf.reshape(output, [batch_size, 16, dim * 16])
         output = batchnorm(output)
-    output = tf.nn.relu(output)
+    output = tf.nn.leaky_relu(output)
 
     # Every block quadruples the amount of samples
 
@@ -131,20 +131,20 @@ def GANGenerator(
             with tf.variable_scope(block_name(block_id)):
                 output = conv1d_transpose(output, num_filters(block_id), kernel_len, 4, upsample=upsample)
                 output = batchnorm(output)
-            output = tf.nn.relu(output)
+            output = tf.nn.leaky_relu(output)
     else:
         # Freeze layers from 1 until num_blocks - 1
         for block_id in range(1, num_blocks):
             with tf.variable_scope(block_name(block_id)):
                 output = conv1d_transpose(output, num_filters(block_id), kernel_len, 4, upsample=upsample, trainable=False)
                 output = batchnorm(output)
-            output = tf.nn.relu(output)
+            output = tf.nn.leaky_relu(output)
 
         # Only make the last layer trainable
         with tf.variable_scope(block_name(num_blocks)):
             output = conv1d_transpose(output, num_filters(num_blocks), kernel_len, 4, upsample=upsample)
             output = batchnorm(output)
-        output = tf.nn.relu(output)
+        output = tf.nn.leaky_relu(output)
 
     # Scoped for the last block so it does not get used when a bigger network runs
     with tf.variable_scope(block_name(num_blocks) + "_output"):
@@ -225,11 +225,13 @@ def GANDiscriminator(
     with tf.variable_scope(block_name(num_blocks) + "_input"):
         # The +1 is needed so the kernel_shape is going to match what the new top layer expects
         # For example 64 input to 128 output channels, without the +1 it would be 128 in to 128 out
+        # output = from_input(output, num_blocks + 1)
         output = from_input(output, num_blocks)
 
     if not freeze_early_layers:
         for block_id in range(num_blocks, 0, -1):
             with tf.variable_scope(block_name(block_id)):
+                # output = tf.layers.conv1d(output, num_filters(block_id), kernel_len, 4, padding="SAME")
                 output = tf.layers.conv1d(output, num_filters(block_id - 1), kernel_len, 4, padding="SAME")
             output = lrelu(output)
             if block_id > 1:
@@ -237,6 +239,7 @@ def GANDiscriminator(
     else:
         # Construct trainable top block
         with tf.variable_scope(block_name(num_blocks)):
+            # output = tf.layers.conv1d(output, num_filters(num_blocks), kernel_len, 4, padding="SAME")
             output = tf.layers.conv1d(output, num_filters(num_blocks - 1), kernel_len, 4, padding="SAME")
         output = lrelu(output)
         if num_blocks > 1:
@@ -245,6 +248,7 @@ def GANDiscriminator(
         # Freeze bottom blocks - run the loop from num_blocks - 1
         for block_id in range(num_blocks - 1, 0, -1):
             with tf.variable_scope(block_name(block_id)):
+                # output = tf.layers.conv1d(output, num_filters(block_id), kernel_len, 4, padding="SAME", trainable=False)
                 output = tf.layers.conv1d(output, num_filters(block_id - 1), kernel_len, 4, padding="SAME", trainable=False)
             output = lrelu(output)
             if block_id > 1:

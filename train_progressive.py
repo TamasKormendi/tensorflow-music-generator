@@ -24,10 +24,10 @@ batch_size = 64
 # G = generator
 # D = discriminator
 
-def train(training_data_dir, train_dir, stage_id, freeze_early_layers=False, use_mixed_precision_training = False):
+def train(training_data_dir, train_dir, stage_id, num_channels, freeze_early_layers=False, use_mixed_precision_training = False):
     print("Training called")
 
-    loader = dataloader.Dataloader(window_size, batch_size, training_data_dir)
+    loader = dataloader.Dataloader(window_size, batch_size, training_data_dir, num_channels)
 
     iterator = loader.get_next()
 
@@ -41,7 +41,7 @@ def train(training_data_dir, train_dir, stage_id, freeze_early_layers=False, use
         # Generator network
         G_input = tf.cast(G_input, tf.float16)
         with tf.variable_scope("G", custom_getter=float32_variable_storage_getter):
-            G_output = GANGenerator(G_input, train=True, num_blocks=stage_id, freeze_early_layers=freeze_early_layers)
+            G_output = GANGenerator(G_input, train=True, num_blocks=stage_id, freeze_early_layers=freeze_early_layers, channels=num_channels)
         G_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope="G")
 
         # Discriminator with real input data
@@ -62,7 +62,7 @@ def train(training_data_dir, train_dir, stage_id, freeze_early_layers=False, use
     else:
         # Generator network
         with tf.variable_scope("G"):
-            G_output = GANGenerator(G_input, train=True, num_blocks=stage_id, freeze_early_layers=freeze_early_layers)
+            G_output = GANGenerator(G_input, train=True, num_blocks=stage_id, freeze_early_layers=freeze_early_layers, channels=num_channels)
         G_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope="G")
 
         # Discriminator with real input data
@@ -194,7 +194,7 @@ def train(training_data_dir, train_dir, stage_id, freeze_early_layers=False, use
 
             # print("Both networks trained")
 
-def infer(train_dir, stage_id, use_mixed_precision_training=False):
+def infer(train_dir, stage_id, num_channels, use_mixed_precision_training=False):
     infer_dir = os.path.join(train_dir, "infer")
     if not os.path.isdir(infer_dir):
         os.makedirs(infer_dir)
@@ -212,10 +212,10 @@ def infer(train_dir, stage_id, use_mixed_precision_training=False):
     # Run the generator
     if use_mixed_precision_training:
         with tf.variable_scope("G", custom_getter=float32_variable_storage_getter):
-            generator_output = GANGenerator(input_placeholder, train=False, num_blocks=stage_id)
+            generator_output = GANGenerator(input_placeholder, train=False, num_blocks=stage_id, channels=num_channels)
     else:
         with tf.variable_scope("G"):
-            generator_output = GANGenerator(input_placeholder, train=False, num_blocks=stage_id)
+            generator_output = GANGenerator(input_placeholder, train=False, num_blocks=stage_id, channels=num_channels)
     generator_output = tf.identity(generator_output, name="G_z")
 
     # Flatten batch and pad it so there is a pause between generated samples
@@ -458,7 +458,7 @@ if __name__ == "__main__":
     amount_to_preview = 5
     mode = "train"
     window_size = get_window_length(num_blocks)
-    use_mixed_precision_training = False
+    use_mixed_precision_training = True
 
     print("Window size: {}".format(window_size))
 
@@ -467,6 +467,8 @@ if __name__ == "__main__":
     else:
         # TODO: make this user-specifiable
         freeze_early_layers = False
+
+    channel_count = utils.get_num_channels(training_data_dir)
 
     #TODO: work-in-progress
     suitable_batch_size_dict_high_vram = {1 : 128,
@@ -482,9 +484,9 @@ if __name__ == "__main__":
 
 
     if mode == "train":
-        infer(get_train_subdirectory(num_blocks, training_dir, freeze_early_layers), num_blocks, use_mixed_precision_training=use_mixed_precision_training)
-        train(training_data_dir, training_dir, num_blocks, freeze_early_layers=freeze_early_layers, use_mixed_precision_training=use_mixed_precision_training)
+        infer(get_train_subdirectory(num_blocks, training_dir, freeze_early_layers), num_blocks, channel_count, use_mixed_precision_training=use_mixed_precision_training)
+        train(training_data_dir, training_dir, num_blocks, channel_count, freeze_early_layers=freeze_early_layers, use_mixed_precision_training=use_mixed_precision_training)
     elif mode == "preview":
         preview(get_train_subdirectory(num_blocks, training_dir, freeze_early_layers), amount_to_preview)
     elif mode == "infer":
-        infer(get_train_subdirectory(num_blocks, training_dir, freeze_early_layers), num_blocks,  use_mixed_precision_training=use_mixed_precision_training)
+        infer(get_train_subdirectory(num_blocks, training_dir, freeze_early_layers), num_blocks, channel_count, use_mixed_precision_training=use_mixed_precision_training)

@@ -10,12 +10,13 @@ BIT_RANGE = 32767
 
 class Dataloader(object):
 
-    def __init__(self, window_length, batch_size, filepath):
+    def __init__(self, window_length, batch_size, filepath, num_channels):
         """
         :param window_length: the amount of samples passed to the 1st conv layer
         :param batch_size: the amount of desired batches
         :param filepath: directory path to the directory where training data is stored
         """
+        self.num_channels = num_channels
         self.window_length = window_length
         self.batch_size = batch_size
 
@@ -35,8 +36,12 @@ class Dataloader(object):
         sampling_rate, raw_samples = utils.read_wav_file(filepath)
         scaled_samples = []
 
-        for sample in raw_samples:
-            scaled_samples.append(sample / BIT_RANGE)
+        if self.num_channels == 1:
+            for sample in raw_samples:
+                scaled_samples.append(sample / BIT_RANGE)
+        else:
+            # https://stackoverflow.com/questions/46269532/python-divide-all-numbers-in-a-2d-list-by-10-and-return-a-2d-list
+            scaled_samples = [[sample / BIT_RANGE for sample in sample_pair] for sample_pair in raw_samples]
 
         print("File at {} loaded".format(filepath))
 
@@ -68,7 +73,10 @@ class Dataloader(object):
             remainder = len(all_samples) % self.window_length
 
             padding_length = self.window_length - remainder
-            all_samples.extend([0] * padding_length)
+            if self.num_channels == 1:
+                all_samples.extend([0] * padding_length)
+            else:
+                all_samples.extend(([[0, 0]] * padding_length))
 
         # Slice all the data into window_length chunks so they can be batched later
         index = 0
@@ -97,7 +105,7 @@ class Dataloader(object):
 
             current_slice_reshaped = np.asarray(current_slice, dtype=np.float32)
             # 1 is the channel amount
-            current_slice_reshaped.shape = (self.window_length, 1)
+            current_slice_reshaped.shape = (self.window_length, self.num_channels)
 
             sliced_samples.append(current_slice_reshaped)
 
