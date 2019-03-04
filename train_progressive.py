@@ -458,7 +458,7 @@ if __name__ == "__main__":
     amount_to_preview = 5
     mode = "train"
     window_size = get_window_length(num_blocks)
-    use_mixed_precision_training = True
+    use_mixed_precision_training = False
 
     print("Window size: {}".format(window_size))
 
