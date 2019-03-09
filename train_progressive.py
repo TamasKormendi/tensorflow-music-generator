@@ -24,10 +24,10 @@ batch_size = 64
 # G = generator
 # D = discriminator
 
-def train(training_data_dir, train_dir, stage_id, num_channels, freeze_early_layers=False, use_mixed_precision_training = False):
+def train(training_data_dir, train_dir, stage_id, num_channels, freeze_early_layers=False, use_mixed_precision_training = False, augmentation_level=0):
     print("Training called")
 
-    loader = dataloader.Dataloader(window_size, batch_size, training_data_dir, num_channels)
+    loader = dataloader.Dataloader(window_size, batch_size, training_data_dir, num_channels, augmentation_level=augmentation_level)
 
     iterator = loader.get_next()
 

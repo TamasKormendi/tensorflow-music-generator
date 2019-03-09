@@ -10,7 +10,7 @@ BIT_RANGE = 32767
 
 class Dataloader(object):
 
-    def __init__(self, window_length, batch_size, filepath, num_channels):
+    def __init__(self, window_length, batch_size, filepath, num_channels, augmentation_level=0):
         """
         :param window_length: the amount of samples passed to the 1st conv layer
         :param batch_size: the amount of desired batches
@@ -20,7 +20,7 @@ class Dataloader(object):
         self.window_length = window_length
         self.batch_size = batch_size
 
-        self.sampling_rate, self.all_sliced_samples = self.process_directory(filepath)
+        self.sampling_rate, self.all_sliced_samples = self.process_directory(filepath, augmentation_level=augmentation_level)
 
         # https://stackoverflow.com/questions/14822184/is-there-a-ceiling-equivalent-of-operator-in-python/17511341#17511341
         # Basically math.ceil() but with support for big ints
@@ -47,11 +47,12 @@ class Dataloader(object):
 
         return sampling_rate, scaled_samples
 
-    def process_directory(self, directory_path):
+    def process_directory(self, directory_path, augmentation_level=0):
         """
         Load all the wav files in a directory, pad them to be divisible by window_length, \n
         slice them up into window_length chunks and return them as a numpy array
         :param directory_path: the path to the directory where the WAV files are
+        :param augmentation_level: specify the amount of data augmentation. Only use with very small datasets
         :return: the sampling rate and all the data as a sliced (window_length chunks) numpy array
         """
         all_samples = []
@@ -65,10 +66,23 @@ class Dataloader(object):
             for sample in current_samples:
                 all_samples.append(sample)
 
-        # Pad our all_samples array so it is divisible by window_length
-        # Then return it as a numpy array
         assert (len(all_samples) != 0), "No training data provided"
 
+        # Data augmentation: offsets the start of samples by win_length // 10 and appends it to the
+        # end of the all_samples list - can be very memory expensive so use it only for small datasets
+        if augmentation_level > 0:
+            assert (len(all_samples) > self.window_length), "Data augmentation is switched on but there are fewer samples than the window length"
+            assert augmentation_level < 10, "Data augmentation level should be below 10, it was {}".format(augmentation_level)
+
+            augmented_data_start = self.window_length // 10
+            augmented_data_end = len(all_samples)
+
+            for i in range(augmentation_level):
+                all_samples.extend(all_samples[augmented_data_start:augmented_data_end])
+
+                augmented_data_start += self.window_length // 10
+
+        # Pad our all_samples array so it is divisible by window_length
         if len(all_samples) % self.window_length != 0:
             remainder = len(all_samples) % self.window_length
 
@@ -104,7 +118,7 @@ class Dataloader(object):
                 mismatch = True
 
             current_slice_reshaped = np.asarray(current_slice, dtype=np.float32)
-            # 1 is the channel amount
+            # Second argument is the channel amount
             current_slice_reshaped.shape = (self.window_length, self.num_channels)
 
             sliced_samples.append(current_slice_reshaped)
