@@ -459,6 +459,7 @@ if __name__ == "__main__":
     mode = "train"
     window_size = get_window_length(num_blocks)
     use_mixed_precision_training = False
+    augmentation_level = 0
 
     print("Window size: {}".format(window_size))
 
@@ -485,7 +486,7 @@ if __name__ == "__main__":
 
     if mode == "train":
         infer(get_train_subdirectory(num_blocks, training_dir, freeze_early_layers), num_blocks, channel_count, use_mixed_precision_training=use_mixed_precision_training)
-        train(training_data_dir, training_dir, num_blocks, channel_count, freeze_early_layers=freeze_early_layers, use_mixed_precision_training=use_mixed_precision_training)
+        train(training_data_dir, training_dir, num_blocks, channel_count, freeze_early_layers=freeze_early_layers, use_mixed_precision_training=use_mixed_precision_training, augmentation_level=augmentation_level)
     elif mode == "preview":
         preview(get_train_subdirectory(num_blocks, training_dir, freeze_early_layers), amount_to_preview)
     elif mode == "infer":
