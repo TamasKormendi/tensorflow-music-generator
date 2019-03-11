@@ -40,13 +40,9 @@ class Dataloader(object):
         scaled_samples.reshape(-1, self.num_channels)
         scaled_samples.shape = (len(scaled_samples), self.num_channels)
 
-        print("File loaded into memory")
-
         scaled_samples = scaled_samples.astype(np.float32) / BIT_RANGE
 
         print("File at {} loaded".format(filepath))
-
-        print(scaled_samples.shape)
 
         return sampling_rate, scaled_samples
 
@@ -60,7 +56,6 @@ class Dataloader(object):
         """
         all_samples = np.array([])
         all_samples.shape = (0, self.num_channels)
-        print(all_samples.shape)
 
         sliced_samples = []
         sampling_rate = 0
@@ -70,8 +65,6 @@ class Dataloader(object):
             sampling_rate, current_samples = self.process_file(filename)
 
             all_samples = np.concatenate((all_samples, current_samples))
-
-        print(all_samples.shape)
 
         assert (len(all_samples) != 0), "No training data provided"
 
