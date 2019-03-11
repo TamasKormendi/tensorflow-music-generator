@@ -34,16 +34,19 @@ class Dataloader(object):
         """
 
         sampling_rate, raw_samples = utils.read_wav_file(filepath)
-        scaled_samples = []
 
-        if self.num_channels == 1:
-            for sample in raw_samples:
-                scaled_samples.append(sample / BIT_RANGE)
-        else:
-            # https://stackoverflow.com/questions/46269532/python-divide-all-numbers-in-a-2d-list-by-10-and-return-a-2d-list
-            scaled_samples = [[sample / BIT_RANGE for sample in sample_pair] for sample_pair in raw_samples]
+        scaled_samples = np.array(raw_samples)
+
+        scaled_samples.reshape(-1, self.num_channels)
+        scaled_samples.shape = (len(scaled_samples), self.num_channels)
+
+        print("File loaded into memory")
+
+        scaled_samples = scaled_samples.astype(np.float32) / BIT_RANGE
 
         print("File at {} loaded".format(filepath))
+
+        print(scaled_samples.shape)
 
         return sampling_rate, scaled_samples
 
@@ -55,7 +58,10 @@ class Dataloader(object):
         :param augmentation_level: specify the amount of data augmentation. Only use with very small datasets
         :return: the sampling rate and all the data as a sliced (window_length chunks) numpy array
         """
-        all_samples = []
+        all_samples = np.array([])
+        all_samples.shape = (0, self.num_channels)
+        print(all_samples.shape)
+
         sliced_samples = []
         sampling_rate = 0
 
@@ -63,8 +69,9 @@ class Dataloader(object):
         for filename in glob.glob(os.path.join(directory_path, "*.wav")):
             sampling_rate, current_samples = self.process_file(filename)
 
-            for sample in current_samples:
-                all_samples.append(sample)
+            all_samples = np.concatenate((all_samples, current_samples))
+
+        print(all_samples.shape)
 
         assert (len(all_samples) != 0), "No training data provided"
 
@@ -78,7 +85,7 @@ class Dataloader(object):
             augmented_data_end = len(all_samples)
 
             for i in range(augmentation_level):
-                all_samples.extend(all_samples[augmented_data_start:augmented_data_end])
+                all_samples = np.concatenate((all_samples, all_samples[augmented_data_start:augmented_data_end]))
 
                 augmented_data_start += self.window_length // 10
 
@@ -88,9 +95,12 @@ class Dataloader(object):
 
             padding_length = self.window_length - remainder
             if self.num_channels == 1:
-                all_samples.extend([0] * padding_length)
+                pad_list = [0] * padding_length
+                pad_list = np.array(pad_list)
+                pad_list.shape = (padding_length, 1)
+                all_samples = np.concatenate((all_samples, pad_list))
             else:
-                all_samples.extend(([[0, 0]] * padding_length))
+                all_samples = np.concatenate((all_samples, [[0, 0]] * padding_length))
 
         # Slice all the data into window_length chunks so they can be batched later
         index = 0

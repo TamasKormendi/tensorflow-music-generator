@@ -450,7 +450,7 @@ def float32_variable_storage_getter(getter, name, shape=None, dtype=None,
 
 if __name__ == "__main__":
 
-    num_blocks = 6
+    num_blocks = 5
     assert (num_blocks >= 1 and num_blocks < 9), "The number of blocks should be between 1 and 8 inclusive, it was {}".format(num_blocks)
 
     training_data_dir = "data/"
