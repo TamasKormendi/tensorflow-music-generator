@@ -119,7 +119,7 @@ def train(training_data_dir, train_dir, stage_id, num_channels, freeze_early_lay
     tf.summary.scalar("Encoder_loss/Reconstruction_loss", tf.reduce_mean(reconstruction_loss))
 
     # Only use the WGAN-GP loss for now for the generator and the discriminator
-    G_loss = -tf.reduce_mean(D_fake_output) + (reconstruction_loss * 0.0001)
+    G_loss = -tf.reduce_mean(D_fake_output) + (reconstruction_loss * 0.001)
     D_loss = tf.reduce_mean(D_fake_output) - tf.reduce_mean(D_real_output)
     E_loss = kl_divergence + reconstruction_loss
 
@@ -492,6 +492,37 @@ def float32_variable_storage_getter(getter, name, shape=None, dtype=None,
     variable = tf.cast(variable, dtype)
   return variable
 
+# The three functions below are adapted from https://github.com/JeremyCCHsu/tf-vaegan/blob/master/util/layer.py
+def gaussian_log_density(input_values, mu, log_variance, name='GaussianLogDensity'):
+    phi = np.log(2 * np.pi)
+    variance = tf.exp(log_variance)
+    input_plus_mu_squared = tf.square(tf.subtract(input_values, mu))
+    input_plus_mu_squared_over_var = tf.div(input_plus_mu_squared, variance + EPSILON_FOR_DENSITY)
+    log_probability = -0.5 * (phi + log_variance + input_plus_mu_squared_over_var)
+    log_probability = tf.reduce_sum(log_probability, -1, name=name)
+    return log_probability
+
+def gaussian_KLD(mu1, log_variance1, mu2, log_variance2):
+    ''' Kullback-Leibler divergence of two Gaussians
+        *Assuming that each dimension is independent
+        mu: mean
+        lv: log variance
+        Equation: http://stats.stackexchange.com/questions/7440/kl-divergence-between-two-univariate-gaussians
+    '''
+    with tf.name_scope('GaussianKLD'):
+        variance1 = tf.exp(log_variance1)
+        variance2 = tf.exp(log_variance2)
+        mu_diff_squared = tf.square(mu1 - mu2)
+        dimensionwise_kld = .5 * (
+            (log_variance2 - log_variance1) + tf.div(variance1, variance2) + tf.div(mu_diff_squared, variance2) - 1.)
+        return tf.reduce_sum(dimensionwise_kld, -1)
+
+def gaussian_sample_layer(z_mu, z_log_variance, name='GaussianSampleLayer'):
+    with tf.name_scope(name):
+        epsilon = tf.random_normal(tf.shape(z_mu))
+        standard_dev = tf.sqrt(tf.exp(z_log_variance))
+        return tf.add(z_mu, tf.multiply(epsilon, standard_dev))
+
 if __name__ == "__main__":
 
     num_blocks = 5
@@ -534,36 +565,3 @@ if __name__ == "__main__":
         preview(get_train_subdirectory(num_blocks, training_dir, freeze_early_layers), amount_to_preview)
     elif mode == "infer":
         infer(get_train_subdirectory(num_blocks, training_dir, freeze_early_layers), num_blocks, channel_count, use_mixed_precision_training=use_mixed_precision_training)
-
-
-
-# The three functions below are adapted from https://github.com/JeremyCCHsu/tf-vaegan/blob/master/util/layer.py
-def gaussian_log_density(input_values, mu, log_variance, name='GaussianLogDensity'):
-    phi = np.log(2 * np.pi)
-    variance = tf.exp(log_variance)
-    input_plus_mu_squared = tf.square(tf.subtract(input_values, mu))
-    input_plus_mu_squared_over_var = tf.div(input_plus_mu_squared, variance + EPSILON_FOR_DENSITY)
-    log_probability = -0.5 * (phi + log_variance + input_plus_mu_squared_over_var)
-    log_probability = tf.reduce_sum(log_probability, -1, name=name)
-    return log_probability
-
-def gaussian_KLD(mu1, log_variance1, mu2, log_variance2):
-    ''' Kullback-Leibler divergence of two Gaussians
-        *Assuming that each dimension is independent
-        mu: mean
-        lv: log variance
-        Equation: http://stats.stackexchange.com/questions/7440/kl-divergence-between-two-univariate-gaussians
-    '''
-    with tf.name_scope('GaussianKLD'):
-        variance1 = tf.exp(log_variance1)
-        variance2 = tf.exp(log_variance2)
-        mu_diff_squared = tf.square(mu1 - mu2)
-        dimensionwise_kld = .5 * (
-            (log_variance2 - log_variance1) + tf.div(variance1, variance2) + tf.div(mu_diff_squared, variance2) - 1.)
-        return tf.reduce_sum(dimensionwise_kld, -1)
-
-def gaussian_sample_layer(z_mu, z_log_variance, name='GaussianSampleLayer'):
-    with tf.name_scope(name):
-        epsilon = tf.random_normal(tf.shape(z_mu))
-        standard_dev = tf.sqrt(tf.exp(z_log_variance))
-        return tf.add(z_mu, tf.multiply(epsilon, standard_dev))
