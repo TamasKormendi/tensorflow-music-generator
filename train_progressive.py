@@ -9,6 +9,8 @@ from model_progressive import GANGenerator, GANDiscriminator, block_name
 import dataloader_progressive as dataloader
 import utils
 
+import argparse
+
 
 SAMPLING_RATE = 16000
 # 100 random inputs for the generator
@@ -24,7 +26,7 @@ batch_size = 64
 # G = generator
 # D = discriminator
 
-def train(training_data_dir, train_dir, stage_id, num_channels, freeze_early_layers=False, use_mixed_precision_training = False, augmentation_level=0):
+def train(training_data_dir, train_dir, stage_id, num_channels, freeze_early_layers=False, use_mixed_precision_training = False, augmentation_level=0, use_samplenorm=False):
     print("Training called")
 
     loader = dataloader.Dataloader(window_size, batch_size, training_data_dir, num_channels, augmentation_level=augmentation_level)
@@ -41,7 +43,7 @@ def train(training_data_dir, train_dir, stage_id, num_channels, freeze_early_lay
         # Generator network
         G_input = tf.cast(G_input, tf.float16)
         with tf.variable_scope("G", custom_getter=float32_variable_storage_getter):
-            G_output = GANGenerator(G_input, train=True, num_blocks=stage_id, freeze_early_layers=freeze_early_layers, channels=num_channels)
+            G_output = GANGenerator(G_input, train=True, num_blocks=stage_id, freeze_early_layers=freeze_early_layers, channels=num_channels, use_samplenorm=use_samplenorm)
         G_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope="G")
 
         # Discriminator with real input data
@@ -62,7 +64,7 @@ def train(training_data_dir, train_dir, stage_id, num_channels, freeze_early_lay
     else:
         # Generator network
         with tf.variable_scope("G"):
-            G_output = GANGenerator(G_input, train=True, num_blocks=stage_id, freeze_early_layers=freeze_early_layers, channels=num_channels)
+            G_output = GANGenerator(G_input, train=True, num_blocks=stage_id, freeze_early_layers=freeze_early_layers, channels=num_channels, use_samplenorm=use_samplenorm)
         G_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope="G")
 
         # Discriminator with real input data
@@ -194,7 +196,7 @@ def train(training_data_dir, train_dir, stage_id, num_channels, freeze_early_lay
 
             # print("Both networks trained")
 
-def infer(train_dir, stage_id, num_channels, use_mixed_precision_training=False):
+def infer(train_dir, stage_id, num_channels, use_mixed_precision_training=False, use_samplenorm=False):
     infer_dir = os.path.join(train_dir, "infer")
     if not os.path.isdir(infer_dir):
         os.makedirs(infer_dir)
@@ -212,10 +214,10 @@ def infer(train_dir, stage_id, num_channels, use_mixed_precision_training=False)
     # Run the generator
     if use_mixed_precision_training:
         with tf.variable_scope("G", custom_getter=float32_variable_storage_getter):
-            generator_output = GANGenerator(input_placeholder, train=False, num_blocks=stage_id, channels=num_channels)
+            generator_output = GANGenerator(input_placeholder, train=False, num_blocks=stage_id, channels=num_channels, use_samplenorm=use_samplenorm)
     else:
         with tf.variable_scope("G"):
-            generator_output = GANGenerator(input_placeholder, train=False, num_blocks=stage_id, channels=num_channels)
+            generator_output = GANGenerator(input_placeholder, train=False, num_blocks=stage_id, channels=num_channels, use_samplenorm=use_samplenorm)
     generator_output = tf.identity(generator_output, name="G_z")
 
     # Flatten batch and pad it so there is a pause between generated samples
@@ -450,44 +452,63 @@ def float32_variable_storage_getter(getter, name, shape=None, dtype=None,
 
 if __name__ == "__main__":
 
-    num_blocks = 5
-    assert (num_blocks >= 1 and num_blocks < 9), "The number of blocks should be between 1 and 8 inclusive, it was {}".format(num_blocks)
-
     training_data_dir = "data/"
     training_dir = "checkpoints/"
     amount_to_preview = 5
-    mode = "train"
-    window_size = get_window_length(num_blocks)
-    use_mixed_precision_training = False
-    augmentation_level = 0
 
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument("--preview", help="Switches on preview mode.", action="store_true")
+    parser.add_argument("--num_blocks", help="Specify the number of blocks", type=int, default=5)
+    parser.add_argument("--use_mixed_precision_training", help="If specified, uses mixed precision training", action="store_true")
+    parser.add_argument("--augmentation_level", help="Specify the level of data augmentation. Only recommended for small datasets.", type=int, default=0)
+    parser.add_argument("--use_sample_norm", help="If specified, uses sample normalisation", action="store_true")
+    parser.add_argument("--freeze_early_layers", help="If specified, freezes early layers", action="store_true")
+    parser.add_argument("--batch_size", help="Specify batch size. If none given it is automatically selected. If an OOM error is encountered run the training again with a lower amount.", type=int)
+
+    args = parser.parse_args()
+
+    preview_mode = args.preview
+    num_blocks = args.num_blocks
+    use_mixed_precision_training = args.use_mixed_precision_training
+    augmentation_level = args.augmentation_level
+    use_samplenorm = args.use_sample_norm
+
+    assert (num_blocks >= 1 and num_blocks < 9), "The number of blocks should be between 1 and 8 inclusive, it was {}".format(num_blocks)
+
+    if not preview_mode:
+        mode = "train"
+    else:
+        mode = "preview"
+
+    window_size = get_window_length(num_blocks)
     print("Window size: {}".format(window_size))
 
     if num_blocks < 2:
         freeze_early_layers = False
     else:
-        # TODO: make this user-specifiable
-        freeze_early_layers = False
+        freeze_early_layers = args.freeze_early_layers
 
     channel_count = utils.get_num_channels(training_data_dir)
 
-    #TODO: work-in-progress
     suitable_batch_size_dict_high_vram = {1 : 128,
                                 2 : 112,
                                 3 : 96,
                                 4 : 80,
                                 5 : 64,
-                                6 : 40,
-                                7 : 16,
-                                8 : 8}
+                                6 : 32,
+                                7 : 8,
+                                8 : 4}
 
-    batch_size = suitable_batch_size_dict_high_vram[num_blocks]
-
+    if not args.batch_size:
+        batch_size = suitable_batch_size_dict_high_vram[num_blocks]
+    else:
+        batch_size = args.batch_size
 
     if mode == "train":
-        infer(get_train_subdirectory(num_blocks, training_dir, freeze_early_layers), num_blocks, channel_count, use_mixed_precision_training=use_mixed_precision_training)
-        train(training_data_dir, training_dir, num_blocks, channel_count, freeze_early_layers=freeze_early_layers, use_mixed_precision_training=use_mixed_precision_training, augmentation_level=augmentation_level)
+        infer(get_train_subdirectory(num_blocks, training_dir, freeze_early_layers), num_blocks, channel_count, use_mixed_precision_training=use_mixed_precision_training, use_samplenorm=use_samplenorm)
+        train(training_data_dir, training_dir, num_blocks, channel_count, freeze_early_layers=freeze_early_layers, use_mixed_precision_training=use_mixed_precision_training, augmentation_level=augmentation_level, use_samplenorm=use_samplenorm)
     elif mode == "preview":
         preview(get_train_subdirectory(num_blocks, training_dir, freeze_early_layers), amount_to_preview)
     elif mode == "infer":
-        infer(get_train_subdirectory(num_blocks, training_dir, freeze_early_layers), num_blocks, channel_count, use_mixed_precision_training=use_mixed_precision_training)
+        infer(get_train_subdirectory(num_blocks, training_dir, freeze_early_layers), num_blocks, channel_count, use_mixed_precision_training=use_mixed_precision_training, use_samplenorm=use_samplenorm)
