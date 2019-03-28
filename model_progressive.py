@@ -123,9 +123,9 @@ def GANGenerator(
     with tf.variable_scope("input_project"):
         output = tf.layers.dense(output, 4 * 4 * dim * 16)
         output = tf.reshape(output, [batch_size, 16, dim * 16])
-        output = samplenorm(output)
         output = batchnorm(output)
     output = tf.nn.leaky_relu(output)
+    output = samplenorm(output)
 
     # Every block quadruples the amount of samples
 
@@ -136,24 +136,24 @@ def GANGenerator(
         for block_id in range(1, num_blocks + 1):
             with tf.variable_scope(block_name(block_id)):
                 output = conv1d_transpose(output, num_filters(block_id), kernel_len, 4, upsample=upsample)
-                output = samplenorm(output)
                 output = batchnorm(output)
             output = tf.nn.leaky_relu(output)
+            output = samplenorm(output)
     else:
         # Freeze layers from 1 until num_blocks - 1
         for block_id in range(1, num_blocks):
             with tf.variable_scope(block_name(block_id)):
                 output = conv1d_transpose(output, num_filters(block_id), kernel_len, 4, upsample=upsample, trainable=False)
-                output = samplenorm(output)
                 output = batchnorm(output)
             output = tf.nn.leaky_relu(output)
+            output = samplenorm(output)
 
         # Only make the last layer trainable
         with tf.variable_scope(block_name(num_blocks)):
             output = conv1d_transpose(output, num_filters(num_blocks), kernel_len, 4, upsample=upsample)
-            output = samplenorm(output)
             output = batchnorm(output)
         output = tf.nn.leaky_relu(output)
+        output = samplenorm(output)
 
     # Scoped for the last block so it does not get used when a bigger network runs
     with tf.variable_scope(block_name(num_blocks) + "_output"):
