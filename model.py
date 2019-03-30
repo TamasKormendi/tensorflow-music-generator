@@ -1,4 +1,4 @@
-# Code adapted from https://github.com/chrisdonahue/wavegan/blob/master/wavegan.py
+# This file is a slight rewrite of https://github.com/chrisdonahue/wavegan/blob/v1/wavegan.py and thus it is heavily based on it
 
 import tensorflow as tf
 

@@ -1,3 +1,16 @@
+"""
+This file is based on WaveGAN v1: https://github.com/chrisdonahue/wavegan/tree/v1
+and the Tensorflow Models implementation of PGGAN: https://github.com/tensorflow/models/tree/master/research/gan/progressive_gan
+
+Both of these are heavily modified so it is not practical to point out which section of code is inspired by which, but in this file
+the train(), infer() and preview() functions are mostly adapted from WaveGAN, while the checkpointing functionality is adapted from
+PGGAN.
+
+Mixed precision training was inspired by these slides: http://on-demand.gputechconf.com/gtc-taiwan/2018/pdf/5-1_Internal%20Speaker_Michael%20Carilli_PDF%20For%20Sharing.pdf
+
+If code is adapted from other sources it is explicitly pointed out.
+"""
+
 import os
 import time
 
@@ -5,20 +18,19 @@ import numpy as np
 import tensorflow as tf
 import pickle
 
-from model_progressive_experimental import GANGenerator, GANDiscriminator, block_name
+from model_progressive_all_pggan_improvements import GANGenerator, GANDiscriminator, block_name
 import dataloader_progressive as dataloader
 import utils
 
+import argparse
 
 SAMPLING_RATE = 16000
 # 100 random inputs for the generator
 G_INIT_INPUT_SIZE = 100
-# TODO: PLACEHOLDER
 D_UPDATES_PER_G_UPDATE = 5
 
 # Set later in main properly
 window_size = 16384
-# TODO: figure out the highest batch_sizes for each stage that doesn't cause out-of-memory error
 batch_size = 64
 
 # G = generator
@@ -174,7 +186,6 @@ def train(training_data_dir, train_dir, stage_id, num_channels, freeze_early_lay
     iterator_init_hook = IteratorInitiasliserHook(iterator, loader.all_sliced_samples)
 
     # Training
-    # TODO: This'll definitely have to be changed
     with tf.train.MonitoredTrainingSession(
         checkpoint_dir=get_train_subdirectory(stage_id, train_dir, freeze_early_layers),
         save_checkpoint_secs=300,
@@ -420,7 +431,7 @@ def get_window_length(num_blocks):
     block_multiplier = 2 * num_blocks
     return 2 ** (base_exponent + block_multiplier)
 
-# https://github.com/tensorflow/tensorflow/issues/12859
+# Adapted from https://github.com/tensorflow/tensorflow/issues/12859
 class IteratorInitiasliserHook(tf.train.SessionRunHook):
     def __init__(self, iterator, data):
         self.iterator = iterator
@@ -431,7 +442,7 @@ class IteratorInitiasliserHook(tf.train.SessionRunHook):
         del coord
         session.run(self.initialiser, feed_dict={"data:0": self.data})
 
-# https://github.com/khcs/fp16-demo-tf/blob/master/mnist_softmax_deep_conv_fp16_advanced.py
+# Adapted from http://on-demand.gputechconf.com/gtc-taiwan/2018/pdf/5-1_Internal%20Speaker_Michael%20Carilli_PDF%20For%20Sharing.pdf
 def float32_variable_storage_getter(getter, name, shape=None, dtype=None,
                                     initializer=None, regularizer=None,
                                     trainable=True,
@@ -450,39 +461,57 @@ def float32_variable_storage_getter(getter, name, shape=None, dtype=None,
 
 if __name__ == "__main__":
 
-    num_blocks = 5
-    assert (num_blocks >= 1 and num_blocks < 9), "The number of blocks should be between 1 and 8 inclusive, it was {}".format(num_blocks)
-
     training_data_dir = "data/"
     training_dir = "checkpoints/"
     amount_to_preview = 5
-    mode = "train"
-    window_size = get_window_length(num_blocks)
-    use_mixed_precision_training = False
-    augmentation_level = 0
 
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument("--preview", help="Switches on preview mode.", action="store_true")
+    parser.add_argument("--num_blocks", help="Specify the number of blocks", type=int, default=5)
+    parser.add_argument("--use_mixed_precision_training", help="If specified, uses mixed precision training", action="store_true")
+    parser.add_argument("--augmentation_level", help="Specify the level of data augmentation. Only recommended for small datasets.", type=int, default=0)
+    parser.add_argument("--use_sample_norm", help="If specified, uses sample normalisation", action="store_true")
+    parser.add_argument("--freeze_early_layers", help="If specified, freezes early layers", action="store_true")
+    parser.add_argument("--batch_size", help="Specify batch size. If none given it is automatically selected. If an OOM error is encountered run the training again with a lower amount.", type=int)
+
+    args = parser.parse_args()
+
+    preview_mode = args.preview
+    num_blocks = args.num_blocks
+    use_mixed_precision_training = args.use_mixed_precision_training
+    augmentation_level = args.augmentation_level
+
+    assert (num_blocks >= 1 and num_blocks < 9), "The number of blocks should be between 1 and 8 inclusive, it was {}".format(num_blocks)
+
+    if not preview_mode:
+        mode = "train"
+    else:
+        mode = "preview"
+
+    window_size = get_window_length(num_blocks)
     print("Window size: {}".format(window_size))
 
     if num_blocks < 2:
         freeze_early_layers = False
     else:
-        # TODO: make this user-specifiable
-        freeze_early_layers = False
+        freeze_early_layers = args.freeze_early_layers
 
     channel_count = utils.get_num_channels(training_data_dir)
 
-    #TODO: work-in-progress
     suitable_batch_size_dict_high_vram = {1 : 128,
                                 2 : 112,
                                 3 : 96,
                                 4 : 80,
                                 5 : 64,
-                                6 : 40,
-                                7 : 16,
-                                8 : 8}
+                                6 : 32,
+                                7 : 8,
+                                8 : 4}
 
-    batch_size = suitable_batch_size_dict_high_vram[num_blocks]
-
+    if not args.batch_size:
+        batch_size = suitable_batch_size_dict_high_vram[num_blocks]
+    else:
+        batch_size = args.batch_size
 
     if mode == "train":
         infer(get_train_subdirectory(num_blocks, training_dir, freeze_early_layers), num_blocks, channel_count, use_mixed_precision_training=use_mixed_precision_training)

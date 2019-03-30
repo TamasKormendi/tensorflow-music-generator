@@ -22,7 +22,7 @@ class Dataloader(object):
 
         self.sampling_rate, self.all_sliced_samples = self.process_directory(filepath, augmentation_level=augmentation_level)
 
-        # https://stackoverflow.com/questions/14822184/is-there-a-ceiling-equivalent-of-operator-in-python/17511341#17511341
+        # Adapted from https://stackoverflow.com/questions/14822184/is-there-a-ceiling-equivalent-of-operator-in-python/17511341#17511341
         # Basically math.ceil() but with support for big ints
         self.num_batches = -(-len(self.all_sliced_samples) // batch_size)
 
@@ -143,19 +143,16 @@ class Dataloader(object):
 
         data_placeholder = tf.placeholder(self.all_sliced_samples.dtype, self.all_sliced_samples.shape, name="data")
 
-        # Create a dataset and batch it
-        # dataset = tf.data.Dataset.from_tensor_slices(self.all_sliced_samples)
-        dataset = tf.data.Dataset.from_tensor_slices(data_placeholder)
+        # Create a dataset, shuffle it and and batch it
 
+        dataset = tf.data.Dataset.from_tensor_slices(data_placeholder)
         dataset = dataset.shuffle(buffer_size=4096)
 
         # If (self.batch_size, True) the last batch gets dropped if size < normal batch_size
         # Current implementation is way too reliant on fixed batch sizes so the remainder is dropped
         dataset = dataset.batch(self.batch_size, True)
 
-        # TODO: has to be changed if the training gets split to separate epochs, need TODO below too for that
         dataset = dataset.repeat()
-        # TODO: Might have to change this to an initialisable iterator if we run into memory issues
         iterator = dataset.make_initializable_iterator()
 
         return iterator

@@ -1,4 +1,3 @@
-import numpy as np
 import scipy.io.wavfile
 import wave
 import glob
@@ -25,17 +24,3 @@ def get_num_channels(data_directory):
 
     assert (channel_count > 0 and channel_count <3), "Channel count has to be 1 or 2, it was {}".format(channel_count)
     return channel_count
-
-"""
-if __name__:
-    #Do not do this for normal usage but for testing it is fine
-    np.set_printoptions(threshold = np.nan)
-
-    sample_rate, samples = read_wav_file("../test.wav")
-
-    print(sample_rate)
-
-    print(samples)
-
-    write_wav_file("../test_write.wav", sample_rate, samples)
-"""

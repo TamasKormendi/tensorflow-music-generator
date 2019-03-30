@@ -1,13 +1,21 @@
-# Code adapted from https://github.com/chrisdonahue/wavegan/blob/master/wavegan.py
+"""
+The code in this file is based on WaveGAN v1: https://github.com/chrisdonahue/wavegan/tree/v1
+and the Tensorflow Models implementation of PGGAN: https://github.com/tensorflow/models/tree/master/research/gan/progressive_gan
+
+Code from both of these is heavily modified so it is not really feasible to point out which section of code is inspired by which.
+"""
 
 import tensorflow as tf
 import math
 
 # fmap means feature map
 def num_filters(block_id, fmap_base=8192, fmap_decay=1.0, fmap_max=256, smooth_later_fmaps=True):
+
+    # This comment block is valid for using the PGGAN fmap calculation method:
     # block_id + 1 is needed since this implementation does not exactly follow the
     # PGGAN implementation - first block outputs 64 samples, thus 8 blocks would be the maximum - 1024x1024
     # return int(min(fmap_base / math.pow(2.0, (block_id + 1) * fmap_decay), fmap_max))
+
     if smooth_later_fmaps:
         if block_id < 5:
             return 1024 // (2 ** block_id)
@@ -15,7 +23,7 @@ def num_filters(block_id, fmap_base=8192, fmap_decay=1.0, fmap_max=256, smooth_l
             base_filters = num_filters(4)
 
             working_block_id = block_id - 4
-            # Ceiling division
+            # Ceiling division based on https://stackoverflow.com/questions/14822184/is-there-a-ceiling-equivalent-of-operator-in-python/17511341#17511341
             exponent = -(-working_block_id // 2)
             divided_filters = base_filters // (2 ** (exponent - 1))
 
@@ -29,12 +37,9 @@ def num_filters(block_id, fmap_base=8192, fmap_decay=1.0, fmap_max=256, smooth_l
 def block_name(block_id):
     return "progressive_block_{}".format(block_id)
 
-# Made generated samples extremely loud - can it be made more reasonable?
-# For example, normalising the values strictly to -1, 1 might make sense to try
 def sample_norm(samples, epsilon=1.0e-8):
     return samples * tf.rsqrt(tf.reduce_mean(tf.square(samples), axis=2, keepdims=True) + epsilon)
 
-# Now TF also has https://www.tensorflow.org/api_docs/python/tf/contrib/nn/conv1d_transpose which might be worth a look
 def conv1d_transpose(
         inputs,
         filters,
@@ -76,8 +81,8 @@ def conv1d_transpose(
 
 """
     Input: 100 random values with shape [None, 100] - called "z" in original code
-    Output: 16384 sound samples with shape [None, 16384, 1]
-    The "None"s are the batch size, 1 in the output is the number of channels
+    Output: Amount of samples corresponding to the output amount of num_blocks with shape [None, output_amount, channel_count]
+    "None" corresponds to the batch_size
 """
 
 def GANGenerator(
@@ -129,9 +134,7 @@ def GANGenerator(
 
     # Every block quadruples the amount of samples
 
-    # Unlike in the PGGAN repo, the whole network is built in the loop
-    # Note: for now it does not do any blending
-    # TODO: figure out how to blend audio between training stages
+    # Unlike in the PGGAN repo, the whole network is built in the loop if the early layers are not frozen
     if not freeze_early_layers:
         for block_id in range(1, num_blocks + 1):
             with tf.variable_scope(block_name(block_id)):
@@ -194,8 +197,8 @@ def apply_phaseshuffle(input, radius, pad_type="reflect"):
     return output
 
 """
-    Input: 16384 sound samples:
-    [None, 16384, 1] - [batch_size, samples, channels]
+    Input: Amount of samples corresponding to output of num_blocks.
+    [None, sample_amount, 1] - [batch_size, samples, channels]
     Output: linear value
 """
 
@@ -228,13 +231,14 @@ def GANDiscriminator(
 
     output = input
 
-    # No blending yet
-    # Whole network is constructed in the loop
-
+    # Whole network is constructed in the loop if the layers are not frozen
     with tf.variable_scope(block_name(num_blocks) + "_input"):
+
+        # Comment below and commented out code parts are valid for the PGGAN method of fmap calculation:
         # The +1 is needed so the kernel_shape is going to match what the new top layer expects
         # For example 64 input to 128 output channels, without the +1 it would be 128 in to 128 out
         # output = from_input(output, num_blocks + 1)
+
         output = from_input(output, num_blocks)
 
     if not freeze_early_layers:

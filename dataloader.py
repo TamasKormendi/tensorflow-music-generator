@@ -21,7 +21,7 @@ class Dataloader(object):
 
         self.sampling_rate, self.all_sliced_samples = self.process_directory(filepath)
 
-        # https://stackoverflow.com/questions/14822184/is-there-a-ceiling-equivalent-of-operator-in-python/17511341#17511341
+        # Adapted from https://stackoverflow.com/questions/14822184/is-there-a-ceiling-equivalent-of-operator-in-python/17511341#17511341
         # Basically math.ceil() but with support for big ints
         self.num_batches = -(-len(self.all_sliced_samples) // batch_size)
 
@@ -109,6 +109,7 @@ class Dataloader(object):
 
         return sampling_rate, np.asarray(sliced_samples, dtype=np.float32)
 
+    # This function is vaguely based on parts from a similar function from https://github.com/chrisdonahue/wavegan/blob/v1/loader.py
     def get_next(self):
         """
         Get the next window_size samples and return them to be used in an input feed_dict (for now)

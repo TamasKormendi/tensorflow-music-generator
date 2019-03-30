@@ -1,3 +1,17 @@
+"""
+This file is based on WaveGAN v1: https://github.com/chrisdonahue/wavegan/tree/v1,
+the Tensorflow Models implementation of PGGAN: https://github.com/tensorflow/models/tree/master/research/gan/progressive_gan
+and the Tensorflow implementation of a VAE-GAN: https://github.com/JeremyCCHsu/tf-vaegan
+
+All of these are heavily modified so it is not practical to point out which section of code is inspired by which, but in this file
+the train(), infer() and preview() functions are mostly adapted from WaveGAN, while the checkpointing functionality is adapted from
+PGGAN. Full functions adapted from the TF-VAEGAN repo are explicitly mentioned.
+
+Mixed precision training was inspired by these slides: http://on-demand.gputechconf.com/gtc-taiwan/2018/pdf/5-1_Internal%20Speaker_Michael%20Carilli_PDF%20For%20Sharing.pdf
+
+If code is adapted from other sources it is explicitly pointed out.
+"""
+
 import os
 import time
 
@@ -9,17 +23,17 @@ from model_progressive_vaegan import GANGenerator, GANDiscriminator, Encoder, bl
 import dataloader_progressive as dataloader
 import utils
 
+import argparse
+
 
 SAMPLING_RATE = 16000
 # 100 random inputs for the generator
 G_INIT_INPUT_SIZE = 100
-# TODO: PLACEHOLDER
 D_UPDATES_PER_G_UPDATE = 5
 EPSILON_FOR_DENSITY = 1e-6
 
 # Set later in main properly
 window_size = 16384
-# TODO: figure out the highest batch_sizes for each stage that doesn't cause out-of-memory error
 batch_size = 64
 
 # G = generator
@@ -135,9 +149,6 @@ def train(training_data_dir, train_dir, stage_id, num_channels, freeze_early_lay
         interpolates = tf.cast(interpolates, tf.float16)
         with tf.name_scope("D_interpolates"), tf.variable_scope("D", reuse=True, custom_getter=float32_variable_storage_getter):
             D_interpolates_output = GANDiscriminator(interpolates, num_blocks=stage_id, freeze_early_layers=freeze_early_layers)
-        # interpolates = tf.cast(interpolates, tf.float32)
-        # D_interpolates_output = tf.cast(D_interpolates_output, tf.float32)
-
 
         gradients = tf.gradients(D_interpolates_output, [interpolates])[0]
         gradients = tf.cast(gradients, tf.float32)
@@ -163,7 +174,7 @@ def train(training_data_dir, train_dir, stage_id, num_channels, freeze_early_lay
     tf.summary.scalar("Loss/Discriminator_loss", D_loss)
 
     with tf.variable_scope("optimiser_vars") as var_scope:
-        # Optimisers - pretty sure for progressive growing changes might be needed, look at the PGGAN paper
+        # Optimisers
         G_opt = tf.train.AdamOptimizer(
             learning_rate=1e-4,
             beta1=0.5,
@@ -217,7 +228,6 @@ def train(training_data_dir, train_dir, stage_id, num_channels, freeze_early_lay
     iterator_init_hook = IteratorInitiasliserHook(iterator, loader.all_sliced_samples)
 
     # Training
-    # TODO: This'll definitely have to be changed
     with tf.train.MonitoredTrainingSession(
         checkpoint_dir=get_train_subdirectory(stage_id, train_dir, freeze_early_layers),
         save_checkpoint_secs=300,
@@ -464,7 +474,7 @@ def get_window_length(num_blocks):
     block_multiplier = 2 * num_blocks
     return 2 ** (base_exponent + block_multiplier)
 
-# https://github.com/tensorflow/tensorflow/issues/12859
+# Adapted from https://github.com/tensorflow/tensorflow/issues/12859
 class IteratorInitiasliserHook(tf.train.SessionRunHook):
     def __init__(self, iterator, data):
         self.iterator = iterator
@@ -475,7 +485,7 @@ class IteratorInitiasliserHook(tf.train.SessionRunHook):
         del coord
         session.run(self.initialiser, feed_dict={"data:0": self.data})
 
-# https://github.com/khcs/fp16-demo-tf/blob/master/mnist_softmax_deep_conv_fp16_advanced.py
+# Adapted from http://on-demand.gputechconf.com/gtc-taiwan/2018/pdf/5-1_Internal%20Speaker_Michael%20Carilli_PDF%20For%20Sharing.pdf
 def float32_variable_storage_getter(getter, name, shape=None, dtype=None,
                                     initializer=None, regularizer=None,
                                     trainable=True,
@@ -502,13 +512,8 @@ def gaussian_log_density(input_values, mu, log_variance, name='GaussianLogDensit
     log_probability = tf.reduce_sum(log_probability, -1, name=name)
     return log_probability
 
+# Adapted from https://github.com/JeremyCCHsu/tf-vaegan/blob/master/util/layer.py
 def gaussian_KLD(mu1, log_variance1, mu2, log_variance2):
-    ''' Kullback-Leibler divergence of two Gaussians
-        *Assuming that each dimension is independent
-        mu: mean
-        lv: log variance
-        Equation: http://stats.stackexchange.com/questions/7440/kl-divergence-between-two-univariate-gaussians
-    '''
     with tf.name_scope('GaussianKLD'):
         variance1 = tf.exp(log_variance1)
         variance2 = tf.exp(log_variance2)
@@ -517,6 +522,7 @@ def gaussian_KLD(mu1, log_variance1, mu2, log_variance2):
             (log_variance2 - log_variance1) + tf.div(variance1, variance2) + tf.div(mu_diff_squared, variance2) - 1.)
         return tf.reduce_sum(dimensionwise_kld, -1)
 
+# Adapted from https://github.com/JeremyCCHsu/tf-vaegan/blob/master/util/layer.py
 def gaussian_sample_layer(z_mu, z_log_variance, name='GaussianSampleLayer'):
     with tf.name_scope(name):
         epsilon = tf.random_normal(tf.shape(z_mu))
@@ -525,38 +531,57 @@ def gaussian_sample_layer(z_mu, z_log_variance, name='GaussianSampleLayer'):
 
 if __name__ == "__main__":
 
-    num_blocks = 5
-    assert (num_blocks >= 1 and num_blocks < 9), "The number of blocks should be between 1 and 8 inclusive, it was {}".format(num_blocks)
-
     training_data_dir = "data/"
     training_dir = "checkpoints/"
     amount_to_preview = 5
-    mode = "train"
-    window_size = get_window_length(num_blocks)
-    use_mixed_precision_training = False
-    augmentation_level = 0
 
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument("--preview", help="Switches on preview mode.", action="store_true")
+    parser.add_argument("--num_blocks", help="Specify the number of blocks", type=int, default=5)
+    parser.add_argument("--use_mixed_precision_training", help="If specified, uses mixed precision training", action="store_true")
+    parser.add_argument("--augmentation_level", help="Specify the level of data augmentation. Only recommended for small datasets.", type=int, default=0)
+    parser.add_argument("--use_sample_norm", help="If specified, uses sample normalisation", action="store_true")
+    parser.add_argument("--freeze_early_layers", help="If specified, freezes early layers", action="store_true")
+    parser.add_argument("--batch_size", help="Specify batch size. If none given it is automatically selected. If an OOM error is encountered run the training again with a lower amount.", type=int)
+
+    args = parser.parse_args()
+
+    preview_mode = args.preview
+    num_blocks = args.num_blocks
+    use_mixed_precision_training = args.use_mixed_precision_training
+    augmentation_level = args.augmentation_level
+
+    assert (num_blocks >= 1 and num_blocks < 9), "The number of blocks should be between 1 and 8 inclusive, it was {}".format(num_blocks)
+
+    if not preview_mode:
+        mode = "train"
+    else:
+        mode = "preview"
+
+    window_size = get_window_length(num_blocks)
     print("Window size: {}".format(window_size))
 
     if num_blocks < 2:
         freeze_early_layers = False
     else:
-        # TODO: make this user-specifiable
-        freeze_early_layers = False
+        freeze_early_layers = args.freeze_early_layers
 
     channel_count = utils.get_num_channels(training_data_dir)
 
-    #TODO: work-in-progress
     suitable_batch_size_dict_high_vram = {1 : 128,
                                 2 : 112,
                                 3 : 96,
                                 4 : 80,
                                 5 : 64,
-                                6 : 40,
-                                7 : 16,
-                                8 : 8}
+                                6 : 32,
+                                7 : 8,
+                                8 : 4}
 
-    batch_size = suitable_batch_size_dict_high_vram[num_blocks]
+    if not args.batch_size:
+        batch_size = suitable_batch_size_dict_high_vram[num_blocks]
+    else:
+        batch_size = args.batch_size
 
     if mode == "train":
         infer(get_train_subdirectory(num_blocks, training_dir, freeze_early_layers), num_blocks, channel_count, use_mixed_precision_training=use_mixed_precision_training)

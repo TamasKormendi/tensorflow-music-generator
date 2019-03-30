@@ -1,4 +1,10 @@
-# Code adapted from https://github.com/chrisdonahue/wavegan/blob/master/wavegan.py
+"""
+The code in this file is based on WaveGAN v1: https://github.com/chrisdonahue/wavegan/tree/v1
+and the Tensorflow Models implementation of PGGAN: https://github.com/tensorflow/models/tree/master/research/gan/progressive_gan
+
+Code from both of these is heavily modified so it is not really feasible to point out which section of code is inspired by which.
+Functions that are only slightly modified from PGGAN are marked explicitly.
+"""
 
 import tensorflow as tf
 import math
@@ -16,7 +22,7 @@ def num_filters(block_id, fmap_base=8192, fmap_decay=1.0, fmap_max=256, smooth_l
             base_filters = num_filters(4)
 
             working_block_id = block_id - 4
-            # Ceiling division
+            # Ceiling division based on https://stackoverflow.com/questions/14822184/is-there-a-ceiling-equivalent-of-operator-in-python/17511341#17511341
             exponent = -(-working_block_id // 2)
             divided_filters = base_filters // (2 ** (exponent - 1))
 
@@ -30,11 +36,8 @@ def num_filters(block_id, fmap_base=8192, fmap_decay=1.0, fmap_max=256, smooth_l
 def block_name(block_id):
     return "progressive_block_{}".format(block_id)
 
-# Made generated samples extremely loud - can it be made more reasonable?
-# For example, normalising the values strictly to -1, 1 might make sense to try
 def sample_norm(samples, epsilon=1.0e-8):
     return samples * tf.rsqrt(tf.reduce_mean(tf.square(samples), axis=2, keepdims=True) + epsilon)
-    # return samples
 
 # Now TF also has https://www.tensorflow.org/api_docs/python/tf/contrib/nn/conv1d_transpose which might be worth a look
 def conv1d_transpose(
@@ -84,8 +87,8 @@ def conv1d_transpose(
 
 """
     Input: 100 random values with shape [None, 100] - called "z" in original code
-    Output: 16384 sound samples with shape [None, 16384, 1]
-    The "None"s are the batch size, 1 in the output is the number of channels
+    Output: Amount of samples corresponding to the output amount of num_blocks with shape [None, output_amount, channel_count]
+    "None" corresponds to the batch_size
 """
 
 def GANGenerator(
@@ -192,8 +195,8 @@ def apply_phaseshuffle(input, radius, pad_type="reflect"):
     return output
 
 """
-    Input: 16384 sound samples:
-    [None, 16384, 1] - [batch_size, samples, channels]
+    Input: Amount of samples corresponding to output of num_blocks.
+    [None, sample_amount, 1] - [batch_size, samples, channels]
     Output: linear value
 """
 
@@ -286,9 +289,7 @@ def GANDiscriminator(
     return output
 
 
-
-
-#https://github.com/tensorflow/models/blob/master/research/gan/progressive_gan/layers.py
+#The functions below are adapted from https://github.com/tensorflow/models/blob/master/research/gan/progressive_gan/layers.py
 
 def minibatch_mean_stddev(input_tensor):
     mean, variance = tf.nn.moments(input_tensor, axes=[0])

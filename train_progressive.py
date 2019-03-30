@@ -1,7 +1,19 @@
+"""
+This file is based on WaveGAN v1: https://github.com/chrisdonahue/wavegan/tree/v1
+and the Tensorflow Models implementation of PGGAN: https://github.com/tensorflow/models/tree/master/research/gan/progressive_gan
+
+Both of these are heavily modified so it is not practical to point out which section of code is inspired by which, but in this file
+the train(), infer() and preview() functions are mostly adapted from WaveGAN, while the checkpointing functionality is adapted from
+PGGAN.
+
+Mixed precision training was inspired by these slides: http://on-demand.gputechconf.com/gtc-taiwan/2018/pdf/5-1_Internal%20Speaker_Michael%20Carilli_PDF%20For%20Sharing.pdf
+
+If code is adapted from other sources it is explicitly pointed out.
+"""
+
 import os
 import time
 
-import numpy as np
 import tensorflow as tf
 import pickle
 
@@ -15,12 +27,11 @@ import argparse
 SAMPLING_RATE = 16000
 # 100 random inputs for the generator
 G_INIT_INPUT_SIZE = 100
-# TODO: PLACEHOLDER
 D_UPDATES_PER_G_UPDATE = 5
 
 # Set later in main properly
 window_size = 16384
-# TODO: figure out the highest batch_sizes for each stage that doesn't cause out-of-memory error
+# Default batch size - set in main properly
 batch_size = 64
 
 # G = generator
@@ -33,6 +44,7 @@ def train(training_data_dir, train_dir, stage_id, num_channels, freeze_early_lay
 
     iterator = loader.get_next()
 
+    # Input (real) training data
     x = iterator.get_next()
 
     print(x.get_shape())
@@ -106,9 +118,6 @@ def train(training_data_dir, train_dir, stage_id, num_channels, freeze_early_lay
         interpolates = tf.cast(interpolates, tf.float16)
         with tf.name_scope("D_interpolates"), tf.variable_scope("D", reuse=True, custom_getter=float32_variable_storage_getter):
             D_interpolates_output = GANDiscriminator(interpolates, num_blocks=stage_id, freeze_early_layers=freeze_early_layers)
-        # interpolates = tf.cast(interpolates, tf.float32)
-        # D_interpolates_output = tf.cast(D_interpolates_output, tf.float32)
-
 
         gradients = tf.gradients(D_interpolates_output, [interpolates])[0]
         gradients = tf.cast(gradients, tf.float32)
@@ -134,7 +143,7 @@ def train(training_data_dir, train_dir, stage_id, num_channels, freeze_early_lay
     tf.summary.scalar("Loss/Discriminator_loss", D_loss)
 
     with tf.variable_scope("optimiser_vars") as var_scope:
-        # Optimisers - pretty sure for progressive growing changes might be needed, look at the PGGAN paper
+        # Optimisers
         G_opt = tf.train.AdamOptimizer(
             learning_rate=1e-4,
             beta1=0.5,
@@ -147,6 +156,7 @@ def train(training_data_dir, train_dir, stage_id, num_channels, freeze_early_lay
         )
 
         if use_mixed_precision_training:
+            # A loss scale of 32 ended up being stable for both networks
             loss_scale = 32.0
 
             G_gradients, G_variables = zip(*G_opt.compute_gradients(G_loss * loss_scale, var_list=G_vars))
@@ -176,7 +186,6 @@ def train(training_data_dir, train_dir, stage_id, num_channels, freeze_early_lay
     iterator_init_hook = IteratorInitiasliserHook(iterator, loader.all_sliced_samples)
 
     # Training
-    # TODO: This'll definitely have to be changed
     with tf.train.MonitoredTrainingSession(
         checkpoint_dir=get_train_subdirectory(stage_id, train_dir, freeze_early_layers),
         save_checkpoint_secs=300,
@@ -189,12 +198,8 @@ def train(training_data_dir, train_dir, stage_id, num_channels, freeze_early_lay
             # Train discriminator
             for i in range(D_UPDATES_PER_G_UPDATE):
                 sess.run(D_train_op)
-            # print("Discriminator trained")
 
             sess.run(G_train_op)
-            # print("Generator trained")
-
-            # print("Both networks trained")
 
 def infer(train_dir, stage_id, num_channels, use_mixed_precision_training=False, use_samplenorm=False):
     infer_dir = os.path.join(train_dir, "infer")
@@ -301,8 +306,8 @@ def preview(train_dir, amount_to_preview):
     # Set up the graph for the generator
     feeds = {}
     feeds[graph.get_tensor_by_name("z:0")] = input_values
-    # Leave half of win_size length of no audio between samples
-    feeds[graph.get_tensor_by_name("flat_pad:0")] = window_size // 2
+    # Leave 1 second of no audio between samples
+    feeds[graph.get_tensor_by_name("flat_pad:0")] = SAMPLING_RATE
     fetches = {}
     fetches["step"] = tf.train.get_or_create_global_step()
     # Output of the generator
@@ -342,7 +347,7 @@ def preview(train_dir, amount_to_preview):
         time.sleep(1)
 
 
-# Stage_id is equivalent to num_blocks for now
+# Stage_id is equivalent to num_blocks
 def make_custom_scaffold(stage_id, optimiser_var_list, training_root_directory, early_layers_frozen):
     restore_var_list = []
     previous_checkpoint = None
@@ -409,7 +414,7 @@ def make_custom_scaffold(stage_id, optimiser_var_list, training_root_directory, 
     return tf.train.Scaffold(init_op=tf.constant([]), init_fn=initialisation_function)
 
 # Return the name of a possibly existing training subdirectory
-# stage_id corresponds to num_blocks for now
+# Stage_id corresponds to num_blocks
 def get_train_subdirectory(stage_id, training_root_directory, early_layers_frozen):
     if early_layers_frozen:
         return os.path.join(training_root_directory, "stage_{:05d}_frozen".format(stage_id))
@@ -422,7 +427,7 @@ def get_window_length(num_blocks):
     block_multiplier = 2 * num_blocks
     return 2 ** (base_exponent + block_multiplier)
 
-# https://github.com/tensorflow/tensorflow/issues/12859
+# Adapted from https://github.com/tensorflow/tensorflow/issues/12859
 class IteratorInitiasliserHook(tf.train.SessionRunHook):
     def __init__(self, iterator, data):
         self.iterator = iterator
@@ -433,7 +438,7 @@ class IteratorInitiasliserHook(tf.train.SessionRunHook):
         del coord
         session.run(self.initialiser, feed_dict={"data:0": self.data})
 
-# https://github.com/khcs/fp16-demo-tf/blob/master/mnist_softmax_deep_conv_fp16_advanced.py
+# Adapted from http://on-demand.gputechconf.com/gtc-taiwan/2018/pdf/5-1_Internal%20Speaker_Michael%20Carilli_PDF%20For%20Sharing.pdf
 def float32_variable_storage_getter(getter, name, shape=None, dtype=None,
                                     initializer=None, regularizer=None,
                                     trainable=True,
