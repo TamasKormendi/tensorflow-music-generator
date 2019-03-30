@@ -134,8 +134,7 @@ def GANGenerator(
     # Every block quadruples the amount of samples
 
     # Unlike in the PGGAN repo, the whole network is built in the loop
-    # Note: for now it does not do any blending
-    # TODO: figure out how to blend audio between training stages
+
     if not freeze_early_layers:
         for block_id in range(1, num_blocks + 1):
             with tf.variable_scope(block_name(block_id)):
