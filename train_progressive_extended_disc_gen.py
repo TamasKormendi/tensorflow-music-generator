@@ -467,7 +467,6 @@ if __name__ == "__main__":
     parser.add_argument("--num_blocks", help="Specify the number of blocks", type=int, default=5)
     parser.add_argument("--use_mixed_precision_training", help="If specified, uses mixed precision training", action="store_true")
     parser.add_argument("--augmentation_level", help="Specify the level of data augmentation. Only recommended for small datasets.", type=int, default=0)
-    parser.add_argument("--use_sample_norm", help="If specified, uses sample normalisation", action="store_true")
     parser.add_argument("--freeze_early_layers", help="If specified, freezes early layers", action="store_true")
     parser.add_argument("--batch_size", help="Specify batch size. If none given it is automatically selected. If an OOM error is encountered run the training again with a lower amount.", type=int)
 
