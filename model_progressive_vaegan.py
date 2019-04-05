@@ -3,7 +3,7 @@ This file is based on WaveGAN v1: https://github.com/chrisdonahue/wavegan/tree/v
 the Tensorflow Models implementation of PGGAN: https://github.com/tensorflow/models/tree/master/research/gan/progressive_gan
 and https://github.com/JeremyCCHsu/tf-vaegan
 
-Code from all of these is heavily modified so it would be impractical to point out which section of code is inspired by which.
+Code from all of these is adapted, modified and interwoven with new code so it would be impractical to point out which section of code is inspired by which.
 Because of that this comment serves as the attribution.
 
 If code is adapted from other sources it is explicitly pointed out.

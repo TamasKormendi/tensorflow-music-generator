@@ -3,7 +3,7 @@ This file is based on WaveGAN v1: https://github.com/chrisdonahue/wavegan/tree/v
 the Tensorflow Models implementation of PGGAN: https://github.com/tensorflow/models/tree/master/research/gan/progressive_gan
 and the Tensorflow implementation of a VAE-GAN: https://github.com/JeremyCCHsu/tf-vaegan
 
-All of these are heavily modified so it is not practical to point out which section of code is inspired by which, but in this file
+All of these are modified and interwoven with new code so it is not practical to point out which section of code is inspired by which, but in this file
 the train(), infer() and preview() functions are mostly adapted from WaveGAN, while the checkpointing functionality is adapted from
 PGGAN. Full functions adapted from the TF-VAEGAN repo are explicitly mentioned. The "main" part also bears some minor similarities to WaveGAN.
 

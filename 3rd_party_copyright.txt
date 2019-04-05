@@ -1,3 +1,5 @@
+Copyright information for external code used in the project:
+
 Progressive GAN code samples are adapted from Tensorflow Models: https://github.com/tensorflow/models
 The complete path for the sub-folder of PGGAN within the repository is: https://github.com/tensorflow/models/tree/master/research/gan/progressive_gan
 

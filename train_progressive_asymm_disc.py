@@ -2,7 +2,7 @@
 This file is based on WaveGAN v1: https://github.com/chrisdonahue/wavegan/tree/v1
 and the Tensorflow Models implementation of PGGAN: https://github.com/tensorflow/models/tree/master/research/gan/progressive_gan
 
-Both of these are heavily modified so it is not practical to point out which section of code is inspired by which, but in this file
+Both of these are modified and interwoven with new code so it is not practical to point out which section of code is inspired by which, but in this file
 the train(), infer() and preview() functions are mostly adapted from WaveGAN, while the checkpointing functionality is adapted from
 PGGAN. The "main" part also bears some minor similarities to WaveGAN.
 
@@ -17,7 +17,7 @@ import time
 import tensorflow as tf
 import pickle
 
-from model_progressive_async_disc import GANGenerator, GANDiscriminator, block_name
+from model_progressive_asymm_disc import GANGenerator, GANDiscriminator, block_name
 import dataloader_progressive as dataloader
 import utils
 
