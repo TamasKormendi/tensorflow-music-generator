@@ -2,8 +2,10 @@
 The code in this file is based on WaveGAN v1: https://github.com/chrisdonahue/wavegan/tree/v1
 and the Tensorflow Models implementation of PGGAN: https://github.com/tensorflow/models/tree/master/research/gan/progressive_gan
 
-Code from both of these is heavily modified so it is not really feasible to point out which section of code is inspired by which,
-so this serves as the attribution.
+Code from both of these is heavily modified so it would be impractical to point out which section of code is inspired by which.
+Because of that this comment serves as the attribution.
+
+If code is adapted from other sources it is explicitly pointed out.
 """
 
 import tensorflow as tf
@@ -236,13 +238,15 @@ def GANDiscriminator(
 
     output = input
 
-    # No blending yet
     # Whole network is constructed in the loop
 
     with tf.variable_scope(block_name(num_blocks) + "_input"):
+
+        # Comment below and commented out code parts are valid for the PGGAN method of fmap calculation:
         # The +1 is needed so the kernel_shape is going to match what the new top layer expects
         # For example 64 input to 128 output channels, without the +1 it would be 128 in to 128 out
         # output = from_input(output, num_blocks + 1)
+
         output = from_input(output, num_blocks)
 
     if not freeze_early_layers:

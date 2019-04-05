@@ -5,9 +5,9 @@ and the Tensorflow implementation of a VAE-GAN: https://github.com/JeremyCCHsu/t
 
 All of these are heavily modified so it is not practical to point out which section of code is inspired by which, but in this file
 the train(), infer() and preview() functions are mostly adapted from WaveGAN, while the checkpointing functionality is adapted from
-PGGAN. Full functions adapted from the TF-VAEGAN repo are explicitly mentioned.
+PGGAN. Full functions adapted from the TF-VAEGAN repo are explicitly mentioned. The "main" part also bears some minor similarities to WaveGAN.
 
-Mixed precision training was inspired by these slides: http://on-demand.gputechconf.com/gtc-taiwan/2018/pdf/5-1_Internal%20Speaker_Michael%20Carilli_PDF%20For%20Sharing.pdf
+Mixed precision training was inspired by and adapted from these slides: http://on-demand.gputechconf.com/gtc-taiwan/2018/pdf/5-1_Internal%20Speaker_Michael%20Carilli_PDF%20For%20Sharing.pdf
 
 If code is adapted from other sources it is explicitly pointed out.
 """
@@ -191,6 +191,8 @@ def train(training_data_dir, train_dir, stage_id, num_channels, freeze_early_lay
             beta2=0.9
         )
         if use_mixed_precision_training:
+            # Adapted from http://on-demand.gputechconf.com/gtc-taiwan/2018/pdf/5-1_Internal%20Speaker_Michael%20Carilli_PDF%20For%20Sharing.pdf
+
             loss_scale = 32.0
 
             G_gradients, G_variables = zip(*G_opt.compute_gradients(G_loss * loss_scale, var_list=G_vars))
@@ -502,7 +504,9 @@ def float32_variable_storage_getter(getter, name, shape=None, dtype=None,
     variable = tf.cast(variable, dtype)
   return variable
 
-# The three functions below are adapted from https://github.com/JeremyCCHsu/tf-vaegan/blob/master/util/layer.py
+# The next three functions below are adapted from https://github.com/JeremyCCHsu/tf-vaegan/blob/master/util/layer.py
+
+# Adapted from https://github.com/JeremyCCHsu/tf-vaegan/blob/master/util/layer.py
 def gaussian_log_density(input_values, mu, log_variance, name='GaussianLogDensity'):
     phi = np.log(2 * np.pi)
     variance = tf.exp(log_variance)

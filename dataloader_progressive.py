@@ -40,6 +40,7 @@ class Dataloader(object):
         scaled_samples.reshape(-1, self.num_channels)
         scaled_samples.shape = (len(scaled_samples), self.num_channels)
 
+        # Probably can be made float16
         scaled_samples = scaled_samples.astype(np.float32) / BIT_RANGE
 
         print("File at {} loaded".format(filepath))
@@ -134,6 +135,9 @@ class Dataloader(object):
 
         return sampling_rate, np.asarray(sliced_samples, dtype=np.float32)
 
+    # This function is vaguely based on parts from a similar function from https://github.com/chrisdonahue/wavegan/blob/v1/loader.py
+    # It is more true for the same function in "dataloader.py" but since the one here and there share a few similarities
+    # I found it safer to mention it here too
     def get_next(self):
         """
         Get the next window_size samples and return them to be used in an input feed_dict (for now)

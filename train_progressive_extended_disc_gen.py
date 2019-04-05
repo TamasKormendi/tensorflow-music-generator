@@ -4,9 +4,9 @@ and the Tensorflow Models implementation of PGGAN: https://github.com/tensorflow
 
 Both of these are heavily modified so it is not practical to point out which section of code is inspired by which, but in this file
 the train(), infer() and preview() functions are mostly adapted from WaveGAN, while the checkpointing functionality is adapted from
-PGGAN.
+PGGAN. The "main" part also bears some minor similarities to WaveGAN.
 
-Mixed precision training was inspired by these slides: http://on-demand.gputechconf.com/gtc-taiwan/2018/pdf/5-1_Internal%20Speaker_Michael%20Carilli_PDF%20For%20Sharing.pdf
+Mixed precision training was inspired by and adapted from these slides: http://on-demand.gputechconf.com/gtc-taiwan/2018/pdf/5-1_Internal%20Speaker_Michael%20Carilli_PDF%20For%20Sharing.pdf
 
 If code is adapted from other sources it is explicitly pointed out.
 """
@@ -156,6 +156,8 @@ def train(training_data_dir, train_dir, stage_id, num_channels, freeze_early_lay
         )
 
         if use_mixed_precision_training:
+            # Adapted from http://on-demand.gputechconf.com/gtc-taiwan/2018/pdf/5-1_Internal%20Speaker_Michael%20Carilli_PDF%20For%20Sharing.pdf
+
             # A loss scale of 32 ended up being stable for both networks
             loss_scale = 32.0
 

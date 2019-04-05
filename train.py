@@ -1,4 +1,7 @@
-# This file is a slight rewrite of https://github.com/chrisdonahue/wavegan/blob/v1/train_wavegan.py and thus it is heavily based on it
+"""
+This whole file is a slight rewrite of https://github.com/chrisdonahue/wavegan/blob/v1/train_wavegan.py and thus it is heavily based on it
+so this comment serves as the attribution.
+"""
 
 import os
 import time
