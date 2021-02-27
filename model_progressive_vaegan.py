@@ -102,7 +102,6 @@ def Encoder(
 
     output = input
 
-    # No blending yet
     # Whole network is constructed in the loop
 
     with tf.variable_scope(block_name(num_blocks) + "_input"):
@@ -290,7 +289,6 @@ def GANDiscriminator(
 
     output = input
 
-    # No blending yet
     # Whole network is constructed in the loop
 
     with tf.variable_scope(block_name(num_blocks) + "_input"):
